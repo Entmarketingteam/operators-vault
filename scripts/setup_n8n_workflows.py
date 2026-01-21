@@ -44,45 +44,56 @@ def request(method: str, path: str, data: dict | None = None) -> dict:
         raise RuntimeError(f"HTTP {e.code}: {err}") from e
 
 
+def _find_workflow(name: str) -> str | None:
+    try:
+        r = request("GET", "/api/v1/workflows")
+        workflows = r.get("data") if isinstance(r.get("data"), list) else (r.get("workflows") or [])
+        for w in workflows:
+            if isinstance(w, dict) and (w.get("name") or "").strip() == name:
+                return str(w.get("id", "")) or None
+    except Exception:
+        pass
+    return None
+
+
+def _ensure_workflow(filepath: Path, name: str, url: str) -> str:
+    data = json.loads(filepath.read_text(encoding="utf-8"))
+    for n in data.get("nodes", []):
+        if n.get("type") == "n8n-nodes-base.httpRequest" and "parameters" in n:
+            n["parameters"]["url"] = url
+            break
+    payload = {"name": name, "nodes": data["nodes"], "connections": data["connections"], "settings": data.get("settings", {})}
+    existing = _find_workflow(name)
+    if existing:
+        request("PUT", f"/api/v1/workflows/{existing}", payload)
+        print(f"Updated: {name} (id={existing})")
+        return existing
+    out = request("POST", "/api/v1/workflows", payload)
+    wid = out.get("id") or (out.get("data") or {}).get("id")
+    print(f"Imported: {name} (id={wid})")
+    return str(wid)
+
+
 def main() -> int:
     if not HOST or not KEY:
         print("N8N_HOST and N8N_API_KEY must be set.", file=sys.stderr)
         return 1
 
-    # 1) Process workflow
-    p = json.loads((ROOT / "n8n-workflow.json").read_text(encoding="utf-8"))
-    for n in p.get("nodes", []):
-        if n.get("type") == "n8n-nodes-base.httpRequest" and "parameters" in n:
-            n["parameters"]["url"] = f"{BASE}/process"
-            break
-    payload = {"name": p.get("name", "Operators Vault – Process Video"), "nodes": p["nodes"], "connections": p["connections"], "settings": p.get("settings", {})}
-    out = request("POST", "/api/v1/workflows", payload)
-    wid1 = out.get("id") or (out.get("data") or {}).get("id")
-    print(f"Imported: {payload['name']} (id={wid1})")
+    wid1 = _ensure_workflow(ROOT / "n8n-workflow.json", "Operators Vault – Process Video", f"{BASE}/process")
+    wid2 = _ensure_workflow(ROOT / "n8n-workflow-fetch-new.json", "Operators Vault – Sync New Episodes", f"{BASE}/sync")
 
-    # 2) Sync workflow
-    s = json.loads((ROOT / "n8n-workflow-fetch-new.json").read_text(encoding="utf-8"))
-    for n in s.get("nodes", []):
-        if n.get("type") == "n8n-nodes-base.httpRequest" and "parameters" in n:
-            n["parameters"]["url"] = f"{BASE}/sync"
-            break
-    payload2 = {"name": s.get("name", "Operators Vault – Sync New Episodes"), "nodes": s["nodes"], "connections": s["connections"], "settings": s.get("settings", {})}
-    out2 = request("POST", "/api/v1/workflows", payload2)
-    wid2 = out2.get("id") or (out2.get("data") or {}).get("id")
-    print(f"Imported: {payload2['name']} (id={wid2})")
-
-    # Activate sync workflow (cron) via dedicated endpoint
-    try:
-        request("POST", f"/api/v1/workflows/{wid2}/activate", {})
-        print(f"Activated sync workflow (id={wid2})")
-    except Exception as e:
-        # try /rest/ if /api/v1/ does not support activate
+    # Activate sync: try PUT with active, else POST /activate
+    for method, path, body in [
+        ("PUT", f"/api/v1/workflows/{wid2}", {"active": True}),
+        ("POST", f"/api/v1/workflows/{wid2}/activate", None),
+    ]:
         try:
-            request("POST", f"/rest/workflows/{wid2}/activate", {})
-            print(f"Activated sync workflow via /rest (id={wid2})")
-        except Exception as e2:
-            print(f"Activate failed (run manually in n8n): {e2}")
-
+            request(method, path, body)
+            print(f"Activated sync workflow (id={wid2})")
+            break
+        except Exception as e:
+            if method == "POST":
+                print(f"Activate failed (toggle Active in n8n): {e}")
     return 0
 
 

@@ -89,4 +89,11 @@ python -m uvicorn api:app --host 0.0.0.0 --port 8000
 
 - `n8n-workflow.json` – One-off: Manual/Webhook → Set (video_id, podcast) → `POST /process`.
 - `n8n-workflow-fetch-new.json` – Cron every 6h → `POST /sync`.
-- Import in n8n; set HTTP node URL to the Pipeline API (e.g. `https://your-app.railway.app/process` or `/sync`). `scripts/import_n8n_workflow.py` imports the process workflow via N8N API.
+- **`scripts/setup_n8n_workflows.py`** – Imports or updates both workflows with `RAILWAY_APP_URL`; idempotent. Requires `N8N_HOST`, `N8N_API_KEY`. Run: `python scripts/setup_n8n_workflows.py`. Turn **Operators Vault – Sync New Episodes** **Active** on in n8n (API activate can fail); Process is manual-only.
+
+---
+
+## 9. Railway
+
+- **App:** https://superb-smile-production.up.railway.app  
+- **DB on Railway:** Direct `db.*.supabase.co` is unreachable from Railway (network). Use the **Session pooler** URI from Supabase: **Settings → Database → Connection string → URI → Session**. Set that as `DATABASE_URL` in Railway and redeploy. Guessing pooler regions (us-east-1, eu-west-1, us-west-1, 6543) returned "Tenant or user not found"—the exact URI from the dashboard is required.
