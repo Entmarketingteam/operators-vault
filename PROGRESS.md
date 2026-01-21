@@ -12,18 +12,21 @@
 - **pipeline.py**: `--seed-csvs`, `--seed-csvs --process-all`, `--process VIDEO_ID [--podcast ...]`, `--fetch-new`, `--process-new`, `--fetch-new --process-new`; `.env` fallback. `_ensure_video` supports `channel_id`, `published_at`.
 - **api.py**: FastAPI `POST /process`, `POST /fetch-new`, `POST /process-new`, `POST /sync`, `GET /health`, `GET /search`, `GET /`; `.env` fallback.
 - **Prompts**: `extract_insights_system`, `make_framework_content`, `timestamp_extraction`, `title_generation` under `prompts/operators/`.
-- **n8n**: `n8n-workflow.json`, `n8n-workflow-fetch-new.json` (cron → `/sync`); `scripts/import_n8n_workflow.py`.
+- **n8n**: `n8n-workflow.json`, `n8n-workflow-fetch-new.json` (cron → `/sync`; Schedule Trigger uses `rule.interval` for 1.2); `scripts/setup_n8n_workflows.py` (idempotent, activates Sync); `scripts/import_n8n_workflow.py`.
 - **scripts/run_all.py**: One-command: schema, optional `--seed-csvs`, fetch-new, process-new; `--schema-only`.
 - **Deps workaround**: `scripts/install_wheels.ps1` downloads wheels from PyPI via `Invoke-WebRequest` and runs `pip install --no-deps` (avoids pip HTTP/2 errors). `wheels/` holds cached wheels. Includes: `click`, `annotated_doc`, `pydantic_core`, `typing_inspection`, `annotated_types`, `requests`, `urllib3`, `camel-converter` (FastAPI/uvicorn/meilisearch deps).
 - **psycopg2-binary**: Installed from a manually downloaded wheel (pip had HTTP/2 issues with PyPI). Other deps can be installed via `install_wheels.ps1` or `pip install -r requirements.txt` when the network allows.
 
 ---
 
-## Not done / Blocked
+## Not done / To fix
 
-- **Schema apply**: `python scripts/run_schema.py` fails with `could not translate host name "db.wbdwnlzbgugewtmvahwg.supabase.co" to address` (DNS/network; DB not reachable from this machine).
-- **Seed + process-all**: Not run; depends on DB and full deps.
-- **API /health**: Runs; returns `status: degraded` when database or meilisearch unreachable, with per-service `checks` (database, youtube, deepgram, anthropic, meilisearch).
+- **`GET /search`**: Returns Meilisearch `invalid_api_key`. Set `MEILISEARCH_API_KEY` on Railway to a key with search (and index) on `operators_insights`.
+- **Optional CSV backfill**: `pipeline.py --seed-csvs --process-all` (CSVs in `%USERPROFILE%\Downloads\`); run where DB reachable.
+
+## Railway (current)
+
+- **App:** https://superb-smile-production.up.railway.app — `DATABASE_URL` = Supabase **Session pooler** (aws-0-us-west-2). Procfile: `run_schema` on startup, then uvicorn. `/health` ok; `POST /sync` works. n8n **Operators Vault – Sync New Episodes** is **Active** (every 6h).
 
 ---
 
@@ -73,11 +76,7 @@
    ```
    (Use `python -m uvicorn` if `uvicorn` is not on PATH.) `POST /process`, `POST /fetch-new`, `POST /process-new`, `POST /sync`. `GET /health`, `GET /search?q=...&podcast=...`.
 
-9. **n8n workflow**:
-   ```powershell
-   python scripts/import_n8n_workflow.py
-   ```
-   Import `n8n-workflow-fetch-new.json` for cron sync (every 6h → `POST /sync`). (Requires `N8N_HOST` and `N8N_API_KEY` in `.env`.)
+9. **n8n workflows**: `python scripts/setup_n8n_workflows.py` (idempotent; sets Railway URL, activates Sync). Or `scripts/import_n8n_workflow.py` for process-only. Requires `N8N_HOST`, `N8N_API_KEY` in `.env`.
 
 ---
 

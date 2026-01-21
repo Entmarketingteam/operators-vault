@@ -29,20 +29,19 @@
 
 ---
 
-## Status: Not Done / Blocked
+## Status: Not Done / To Fix
 
-- **Schema apply and pipeline runs** not successfully executed in the original dev environment (Supabase DB host unreachable via DNS; depends on network).
+- **`GET /search`** returns `invalid_api_key` from Meilisearch. Set `MEILISEARCH_API_KEY` in Railway to a key with **search** (and index) on `operators_insights`; get from Meilisearch project.
 - **Finance Operators** default handle `FinanceOperators` may be wrong; override with `YOUTUBE_CHANNEL_FINANCE_OPERATORS` if needed.
+- **Optional CSV backfill:** `python pipeline.py --seed-csvs --process-all` if CSVs are in `%USERPROFILE%\Downloads\` (run where DB reachable).
 
 ---
 
 ## Next Steps (When Picking Up)
 
-1. **Validate run:** On a host with DB + Meilisearch + YouTube API: `python scripts/run_schema.py` then `python scripts/run_all.py`. Fix any env or runtime errors.
-2. **Optional backfill:** `python pipeline.py --seed-csvs --process-all` if CSVs are in `%USERPROFILE%\Downloads\` and you want to process the initial lists.
-3. **API checks:** Run `uvicorn api:app --host 0.0.0.0 --port 8000`, then `GET /health`, `GET /search?q=...`.
-4. **n8n:** Import `n8n-workflow-fetch-new.json`, set URL to `/sync`, activate schedule.
-5. **If “keep building”:** Consider: background/async for `POST /process-new` and `POST /sync` (return 202 + job), or a simple UI for /search; or more filters/ordering on /search.
+1. **Meilisearch:** Fix `MEILISEARCH_API_KEY` on Railway (key with search on `operators_insights`). Then `GET /search?q=...` works.
+2. **Optional backfill:** `python pipeline.py --seed-csvs --process-all` (CSVs in `%USERPROFILE%\Downloads\`).
+3. **If “keep building”:** background/async for `POST /process-new` and `POST /sync` (202 + job); simple UI for /search; more filters/ordering on /search.
 
 ---
 
@@ -51,4 +50,4 @@
 - **New agent / developer:** Read `HANDOFF.md` first, then this file and `PROGRESS.md`.
 - **Repo:** https://github.com/Entmarketingteam/operators-vault  
 - **Local:** `C:\Users\ethan.atchley\operators-vault`
-- **Previous session:** Expanded `install_wheels.ps1` with `click`, `annotated_doc`, `pydantic_core`, `typing_inspection`, `annotated_types`, `requests`, `urllib3`, `camel-converter`. API starts with `python -m uvicorn api:app --host 0.0.0.0 --port 8000`; `GET /health` and `GET /` work; `GET /search` returns 500 when Meilisearch unreachable (SSL/network). `run_schema` still fails (Supabase DNS).
+- **Where we are:** Railway https://superb-smile-production.up.railway.app live. `DATABASE_URL` = Supabase Session pooler (aws-0-us-west-2). `/health` ok; `POST /sync` works. n8n **Operators Vault – Sync New Episodes** updated (Schedule Trigger `rule.interval`), **Active** every 6h. `n8n-workflow-fetch-new.json` and `setup_n8n_workflows.py` idempotent. **`GET /search`** → `invalid_api_key`: fix `MEILISEARCH_API_KEY` on Railway.

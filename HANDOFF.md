@@ -13,8 +13,8 @@ Podcast intelligence for **9 Operators**, **Marketing Operator**, **Finance Oper
 ## 2. Where We Are (Current State)
 
 - **Implemented and committed:** Schema, pipeline (seed, process, fetch-new, process-new), API (process, fetch-new, process-new, sync, health, search), youtube_client (CSVs + YouTube Data API), prompts, run_schema, run_all, n8n workflows, install_wheels workaround.
-- **.env:** `DATABASE_URL`, `YOUTUBE_API_KEY`, `DEEPGRAM_API_KEY`, `ANTHROPIC_API_KEY`, `MEILISEARCH_*`, `N8N_*` are set. `.env` is gitignored.
-- **Not yet run in this environment:** `run_schema` (DB was unreachable: DNS to Supabase). `--seed-csvs --process-all` and `run_all` not executed (depend on DB + full deps). On a machine with DB + Meilisearch + internet, the intended flow works.
+- **Railway:** https://superb-smile-production.up.railway.app — `DATABASE_URL` = Supabase **Session pooler** (aws-0-us-west-2). `/health` all ok; `POST /sync` works; **Operators Vault – Sync New Episodes** in n8n is updated and **Active** (every 6h). `GET /search` can return `invalid_api_key` if `MEILISEARCH_API_KEY` on Railway is wrong or lacks search rights—fix in Meilisearch/Railway if needed.
+- **Optional:** `--seed-csvs --process-all` for CSV backfill (CSVs in `%USERPROFILE%\Downloads\`); run where DB is reachable.
 
 ---
 
@@ -89,11 +89,12 @@ python -m uvicorn api:app --host 0.0.0.0 --port 8000
 
 - `n8n-workflow.json` – One-off: Manual/Webhook → Set (video_id, podcast) → `POST /process`.
 - `n8n-workflow-fetch-new.json` – Cron every 6h → `POST /sync`.
-- **`scripts/setup_n8n_workflows.py`** – Imports or updates both workflows with `RAILWAY_APP_URL`; idempotent. Requires `N8N_HOST`, `N8N_API_KEY`. Run: `python scripts/setup_n8n_workflows.py`. Turn **Operators Vault – Sync New Episodes** **Active** on in n8n (API activate can fail); Process is manual-only.
+- **`scripts/setup_n8n_workflows.py`** – Imports or updates both workflows with `RAILWAY_APP_URL`; idempotent. Requires `N8N_HOST`, `N8N_API_KEY`. Run: `python scripts/setup_n8n_workflows.py`. **Operators Vault – Sync New Episodes** uses `rule.interval` (Schedule Trigger 1.2) so API activate works; Process is manual-only.
 
 ---
 
 ## 9. Railway
 
 - **App:** https://superb-smile-production.up.railway.app  
-- **DB on Railway:** Direct `db.*.supabase.co` is unreachable from Railway (network). Use the **Session pooler** URI from Supabase: **Settings → Database → Connection string → URI → Session**. Set that as `DATABASE_URL` in Railway and redeploy. Guessing pooler regions (us-east-1, eu-west-1, us-west-1, 6543) returned "Tenant or user not found"—the exact URI from the dashboard is required.
+- **DB:** `DATABASE_URL` = Supabase **Session pooler** (e.g. `aws-0-us-west-2.pooler.supabase.com:5432`). Get from Supabase: **Project Settings → Database → Connection string → Pooler settings → Session**.  
+- **Meilisearch:** If `GET /search` returns `invalid_api_key`, set `MEILISEARCH_API_KEY` in Railway to a key with **search** (and index) on `operators_insights`.
