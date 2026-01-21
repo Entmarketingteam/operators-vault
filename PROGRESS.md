@@ -14,15 +14,16 @@
 - **Prompts**: `extract_insights_system`, `make_framework_content`, `timestamp_extraction`, `title_generation` under `prompts/operators/`.
 - **n8n**: `n8n-workflow.json`, `n8n-workflow-fetch-new.json` (cron → `/sync`); `scripts/import_n8n_workflow.py`.
 - **scripts/run_all.py**: One-command: schema, optional `--seed-csvs`, fetch-new, process-new; `--schema-only`.
-- **Deps workaround**: `scripts/install_wheels.ps1` downloads wheels from PyPI via `Invoke-WebRequest` and runs `pip install --no-deps` (avoids pip HTTP/2 errors). `wheels/` holds cached wheels.
+- **Deps workaround**: `scripts/install_wheels.ps1` downloads wheels from PyPI via `Invoke-WebRequest` and runs `pip install --no-deps` (avoids pip HTTP/2 errors). `wheels/` holds cached wheels. Includes: `click`, `annotated_doc`, `pydantic_core`, `typing_inspection`, `annotated_types`, `requests`, `urllib3`, `camel-converter` (FastAPI/uvicorn/meilisearch deps).
 - **psycopg2-binary**: Installed from a manually downloaded wheel (pip had HTTP/2 issues with PyPI). Other deps can be installed via `install_wheels.ps1` or `pip install -r requirements.txt` when the network allows.
 
 ---
 
 ## Not done / Blocked
 
-- **Schema apply**: `python scripts/run_schema.py` failed with `could not translate host name "db.wbdwnlzbgugewtmvahwg.supabase.co" to address` (DNS/network; DB not reachable from this machine).
-- **Seed + process-all**: Not run; depends on DB and full deps. Pipeline needs: `yt-dlp`, `deepgram-sdk`, `anthropic`, `meilisearch`, `python-dotenv`, and their deps.
+- **Schema apply**: `python scripts/run_schema.py` fails with `could not translate host name "db.wbdwnlzbgugewtmvahwg.supabase.co" to address` (DNS/network; DB not reachable from this machine).
+- **Seed + process-all**: Not run; depends on DB and full deps.
+- **API /health**: Runs; returns `status: degraded` when database or meilisearch unreachable, with per-service `checks` (database, youtube, deepgram, anthropic, meilisearch).
 
 ---
 
@@ -68,9 +69,9 @@
 
 8. **API** (for n8n or HTTP):
    ```powershell
-   uvicorn api:app --host 0.0.0.0 --port 8000
+   python -m uvicorn api:app --host 0.0.0.0 --port 8000
    ```
-   `POST /process`, `POST /fetch-new`, `POST /process-new`, `POST /sync`. `GET /health`, `GET /search?q=...&podcast=...`.
+   (Use `python -m uvicorn` if `uvicorn` is not on PATH.) `POST /process`, `POST /fetch-new`, `POST /process-new`, `POST /sync`. `GET /health`, `GET /search?q=...&podcast=...`.
 
 9. **n8n workflow**:
    ```powershell

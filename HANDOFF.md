@@ -60,7 +60,7 @@ python scripts/run_all.py
 python scripts/run_all.py --seed-csvs
 
 # API
-uvicorn api:app --host 0.0.0.0 --port 8000
+python -m uvicorn api:app --host 0.0.0.0 --port 8000
 # Then: GET /health, GET /search?q=..., POST /sync, POST /process, etc.
 ```
 

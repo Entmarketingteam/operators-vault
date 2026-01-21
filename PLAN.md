@@ -51,3 +51,4 @@
 - **New agent / developer:** Read `HANDOFF.md` first, then this file and `PROGRESS.md`.
 - **Repo:** https://github.com/Entmarketingteam/operators-vault  
 - **Local:** `C:\Users\ethan.atchley\operators-vault`
+- **Previous session:** Expanded `install_wheels.ps1` with `click`, `annotated_doc`, `pydantic_core`, `typing_inspection`, `annotated_types`, `requests`, `urllib3`, `camel-converter`. API starts with `python -m uvicorn api:app --host 0.0.0.0 --port 8000`; `GET /health` and `GET /` work; `GET /search` returns 500 when Meilisearch unreachable (SSL/network). `run_schema` still fails (Supabase DNS).

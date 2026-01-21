@@ -6,13 +6,13 @@ $ErrorActionPreference = "Stop"
 $Python = "python"
 $PACKAGES = @(
     "python-dotenv",
-    "httpx", "httpcore", "certifi", "anyio", "sniffio", "idna", "h11",
+    "httpx", "httpcore", "certifi", "anyio", "sniffio", "idna", "h11", "requests", "urllib3",
     "anthropic", "pydantic", "typing_extensions",
     "deepgram-sdk", "websockets",
-    "meilisearch",
+    "meilisearch", "camel-converter",
     "yt-dlp",
     "openai", "distro",
-    "fastapi", "starlette", "uvicorn"
+    "fastapi", "starlette", "uvicorn", "click", "annotated_doc", "pydantic_core", "typing_inspection", "annotated_types"
 )
 
 $wheelsDir = Join-Path (Join-Path $PSScriptRoot "..") "wheels"
