@@ -1,0 +1,64 @@
+{
+  "name": "Operators Vault – Process Video",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0001-4000-8000-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "id": "v1", "name": "video_id", "value": "dQw4w9WgXcQ", "type": "string" },
+            { "id": "v2", "name": "podcast", "value": "9operators", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000002",
+      "name": "Set",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [220, 0],
+      "notesInFlow": true,
+      "notes": "Replace with static values or, when using Webhook, switch to expression: video_id = {{ $json.body.video_id }}, podcast = {{ $json.body.podcast || '9operators' }}"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:8000/process",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ video_id: $json.video_id, podcast: $json.podcast }) }}",
+        "options": { "timeout": 600000 }
+      },
+      "id": "a1b2c3d4-0001-4000-8000-000000000003",
+      "name": "HTTP Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [440, 0],
+      "notesInFlow": true,
+      "notes": "Set url to your Pipeline API (e.g. https://your-app.railway.app/process). Ensure the API is running: uvicorn api:app --host 0.0.0.0"
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Set", "type": "main", "index": 0 }]]
+    },
+    "Set": {
+      "main": [[{ "node": "HTTP Request", "type": "main", "index": 0 }]]
+    }
+  },
+  "meta": {
+    "templateCredsCompletionPreview": {}
+  },
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "tags": [{ "name": "operators-vault" }],
+  "pinData": {}
+}

@@ -1,0 +1,16 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.idea/
+*.egg-info/
+dist/
+build/
+*.log
+.DS_Store
+
+# Downloaded wheels (install via scripts/install_wheels.ps1 or pip)
+wheels/
+*.whl
