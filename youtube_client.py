@@ -11,6 +11,13 @@ import re
 from pathlib import Path
 from typing import Any
 
+# YouTube @handles for fetch-new (override via YOUTUBE_CHANNEL_<PODCAST> env, e.g. YOUTUBE_CHANNEL_FINANCE_OPERATORS)
+DEFAULT_CHANNEL_HANDLES = {
+    "9operators": "Operators9",
+    "marketing_operator": "MarketingOperators",
+    "finance_operators": "FinanceOperators",
+}
+
 # CSV seed paths (Windows); override via env or pass to functions
 DEFAULT_CSV_PATHS = {
     "9operators": os.path.join(os.environ.get("USERPROFILE", ""), "Downloads", "Operators Podcast Video Youtube Links.csv"),
@@ -109,6 +116,16 @@ def load_all_seed_csvs(
     return merged
 
 
+def get_channel_handle(podcast: str) -> str | None:
+    """Resolve podcast to @handle. Env override: YOUTUBE_CHANNEL_FINANCE_OPERATORS etc."""
+    key = (podcast or "").upper().replace("-", "_")
+    env_var = f"YOUTUBE_CHANNEL_{key}"
+    v = os.environ.get(env_var, "").strip()
+    if v:
+        return v.lstrip("@")
+    return (DEFAULT_CHANNEL_HANDLES or {}).get(podcast or "")
+
+
 def resolve_channel_id(for_handle: str, api_key: str | None = None) -> str | None:
     """
     Resolve a YouTube @handle (e.g. 'Operators9', 'MarketingOperators') to channel ID.
@@ -172,14 +189,15 @@ def fetch_channel_videos(
         sn = it.get("snippet") or {}
         cd = it.get("contentDetails") or {}
         dur_iso = cd.get("duration") or ""
-        # PT1H27M30S -> seconds
         sec = _parse_iso8601_duration(dur_iso)
+        published_at = sn.get("publishedAt")  # ISO 8601; pass through for DB TIMESTAMPTZ
         out.append({
             "video_id": vid,
             "title": sn.get("title") or "",
             "duration_seconds": sec,
             "channel_id": channel_id,
             "podcast": podcast,
+            "published_at": published_at,
         })
     return out
 

@@ -43,7 +43,13 @@ def main() -> int:
         conn = psycopg2.connect(db_url)
         conn.autocommit = True
         cur = conn.cursor()
-        cur.execute(sql)
+        for stmt in sql.split(";"):
+            stmt = stmt.strip()
+            if not stmt:
+                continue
+            if all(not ln.strip() or ln.strip().startswith("--") for ln in stmt.splitlines()):
+                continue
+            cur.execute(stmt + ";")
         cur.close()
         conn.close()
         print("Schema applied successfully.")

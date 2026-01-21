@@ -4,6 +4,9 @@ Usage:
   python pipeline.py --seed-csvs
   python pipeline.py --seed-csvs --process-all
   python pipeline.py --process VIDEO_ID [--podcast 9operators|marketing_operator|finance_operators]
+  python pipeline.py --fetch-new              # fetch new videos from YouTube channels, upsert to videos
+  python pipeline.py --process-new            # process videos that have no transcription yet
+  python pipeline.py --fetch-new --process-new
 """
 from __future__ import annotations
 
@@ -56,18 +59,28 @@ def _format_timestamped(utterances: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _ensure_video(cursor, video_id: str, podcast: str, title: str = "", duration_seconds: int | None = None) -> None:
+def _ensure_video(
+    cursor,
+    video_id: str,
+    podcast: str,
+    title: str = "",
+    duration_seconds: int | None = None,
+    channel_id: str | None = None,
+    published_at: str | None = None,
+) -> None:
     cursor.execute(
         """
-        INSERT INTO videos (video_id, podcast, title, duration_seconds)
-        VALUES (%s, %s, %s, %s)
+        INSERT INTO videos (video_id, podcast, title, duration_seconds, channel_id, published_at)
+        VALUES (%s, %s, %s, %s, %s, %s::timestamptz)
         ON CONFLICT (video_id) DO UPDATE SET
           podcast = EXCLUDED.podcast,
           title = COALESCE(NULLIF(EXCLUDED.title,''), videos.title),
           duration_seconds = COALESCE(EXCLUDED.duration_seconds, videos.duration_seconds),
+          channel_id = COALESCE(EXCLUDED.channel_id, videos.channel_id),
+          published_at = COALESCE(EXCLUDED.published_at, videos.published_at),
           updated_at = now()
         """,
-        (video_id, podcast, title or "", duration_seconds),
+        (video_id, podcast, title or "", duration_seconds, channel_id, published_at),
     )
 
 
@@ -84,6 +97,53 @@ def _seed_csvs(cursor) -> int:
             r.get("duration_seconds"),
         )
     return len(rows)
+
+
+def _fetch_new(cursor, *, max_per_channel: int = 50, min_duration_sec: int = 300) -> int:
+    """Fetch recent videos from YouTube channels (Operators9, MarketingOperators, FinanceOperators) and upsert into videos. Requires YOUTUBE_API_KEY."""
+    from youtube_client import fetch_channel_videos, get_channel_handle, resolve_channel_id
+
+    total = 0
+    for podcast in ("9operators", "marketing_operator", "finance_operators"):
+        handle = get_channel_handle(podcast)
+        if not handle:
+            continue
+        cid = resolve_channel_id(handle)
+        if not cid:
+            print(f"  [fetch-new] {podcast}: could not resolve @{handle}", flush=True)
+            continue
+        videos = fetch_channel_videos(cid, podcast=podcast, max_results=max_per_channel)
+        n = 0
+        for v in videos:
+            dur = v.get("duration_seconds")
+            if dur is not None and dur < min_duration_sec:
+                continue
+            _ensure_video(
+                cursor,
+                v["video_id"],
+                v["podcast"],
+                v.get("title") or "",
+                dur,
+                channel_id=v.get("channel_id"),
+                published_at=v.get("published_at"),
+            )
+            n += 1
+            total += 1
+        print(f"  [fetch-new] {podcast}: {n} upserted (from {len(videos)} fetched)", flush=True)
+    return total
+
+
+def _get_unprocessed(cursor) -> list[tuple[str, str]]:
+    """Return (video_id, podcast) for videos that have no transcription yet."""
+    cursor.execute(
+        """
+        SELECT v.video_id, v.podcast FROM videos v
+        LEFT JOIN transcriptions t ON t.video_id = v.video_id
+        WHERE t.id IS NULL
+        ORDER BY v.published_at DESC NULLS LAST, v.created_at DESC
+        """
+    )
+    return [(r[0], r[1]) for r in cursor.fetchall()]
 
 
 def _process_one(
@@ -250,6 +310,8 @@ def main() -> int:
     ap.add_argument("--process-all", action="store_true", help="After --seed-csvs, process each video (audio->transcribe->extract->store)")
     ap.add_argument("--process", metavar="VIDEO_ID", help="Process one video: download audio, transcribe, extract insights, store")
     ap.add_argument("--podcast", default="9operators", choices=("9operators", "marketing_operator", "finance_operators"), help="For --process when video not in DB")
+    ap.add_argument("--fetch-new", action="store_true", help="Fetch new videos from YouTube channels (9 Operators, Marketing, Finance) and upsert into videos. Requires YOUTUBE_API_KEY.")
+    ap.add_argument("--process-new", action="store_true", help="Process videos that have no transcription yet (audio->transcribe->extract->store)")
     ap.add_argument("--work-dir", default=None, help="Temp dir for audio (default: TEMP)")
     ap.add_argument("--prompt-set", default="operators", help="Prompt set under prompts/ (default: operators)")
     args = ap.parse_args()
@@ -283,6 +345,44 @@ def main() -> int:
     if args.process:
         ok = _process_one(args.process, args.podcast, work_dir=work_dir, prompt_set=args.prompt_set)
         return 0 if ok else 1
+
+    if args.fetch_new:
+        if not db_url:
+            print("DATABASE_URL not set; cannot fetch-new.", flush=True)
+            return 1
+        if not os.environ.get("YOUTUBE_API_KEY"):
+            print("YOUTUBE_API_KEY not set; required for --fetch-new.", flush=True)
+            return 1
+        import psycopg2
+
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        n = _fetch_new(cur)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"Fetch-new: {n} videos upserted.", flush=True)
+        if not args.process_new:
+            return 0
+
+    if args.process_new:
+        if not db_url:
+            print("DATABASE_URL not set; cannot process-new.", flush=True)
+            return 1
+        import psycopg2
+
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        rows = _get_unprocessed(cur)
+        cur.close()
+        conn.close()
+        if not rows:
+            print("No unprocessed videos.", flush=True)
+            return 0
+        for i, (vid, pod) in enumerate(rows):
+            print(f"[{i+1}/{len(rows)}] {vid} ({pod})", flush=True)
+            _process_one(vid, pod, work_dir=work_dir, prompt_set=args.prompt_set)
+        return 0
 
     ap.print_help()
     return 0
