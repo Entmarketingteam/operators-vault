@@ -1,8 +1,10 @@
 """
-Operators Vault pipeline: seed from CSVs, process videos (audio -> transcribe -> chunk -> extract -> store).
+Operators Vault pipeline: seed from CSVs or seed_links (Supabase), process videos (audio -> transcribe -> chunk -> extract -> store).
 Usage:
   python pipeline.py --seed-csvs
   python pipeline.py --seed-csvs --process-all
+  python pipeline.py --seed-csvs-to-db        # CSVs -> seed_links (Supabase)
+  python pipeline.py --seed-from-db [--process-all]   # seed_links -> videos; with --process-all then process unprocessed
   python pipeline.py --process VIDEO_ID [--podcast 9operators|marketing_operator|finance_operators]
   python pipeline.py --fetch-new              # fetch new videos from YouTube channels, upsert to videos
   python pipeline.py --process-new            # process videos that have no transcription yet
@@ -84,10 +86,10 @@ def _ensure_video(
     )
 
 
-def _seed_csvs(cursor) -> int:
+def _seed_csvs(cursor, paths_override: dict[str, str] | None = None) -> int:
     from youtube_client import load_all_seed_csvs
 
-    rows = load_all_seed_csvs()
+    rows = load_all_seed_csvs(paths=paths_override)
     for r in rows:
         _ensure_video(
             cursor,
@@ -97,6 +99,56 @@ def _seed_csvs(cursor) -> int:
             r.get("duration_seconds"),
         )
     return len(rows)
+
+
+def upsert_seed_links(cursor, rows: list[dict]) -> int:
+    """
+    Upsert into seed_links. Each row: video_id, podcast, title?, duration_seconds?, url?.
+    Returns number of rows upserted. ON CONFLICT (video_id, podcast) DO UPDATE.
+    """
+    n = 0
+    for r in rows:
+        vid = (r.get("video_id") or "").strip()
+        pod = (r.get("podcast") or "").strip()
+        if not vid or not pod:
+            continue
+        cursor.execute(
+            """
+            INSERT INTO seed_links (video_id, podcast, title, duration_seconds, url)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (video_id, podcast) DO UPDATE SET
+              title = COALESCE(NULLIF(EXCLUDED.title,''), seed_links.title),
+              duration_seconds = COALESCE(EXCLUDED.duration_seconds, seed_links.duration_seconds),
+              url = COALESCE(NULLIF(EXCLUDED.url,''), seed_links.url),
+              updated_at = now()
+            """,
+            (
+                vid,
+                pod,
+                (r.get("title") or "")[:2048] if r.get("title") else "",
+                r.get("duration_seconds"),
+                (r.get("url") or "")[:2048] if r.get("url") else "",
+            ),
+        )
+        n += 1
+    return n
+
+
+def _seed_from_db(cursor) -> int:
+    """Upsert from seed_links into videos. Returns number of rows upserted."""
+    cursor.execute("SELECT video_id, podcast, title, duration_seconds FROM seed_links")
+    rows = cursor.fetchall()
+    for r in rows:
+        _ensure_video(cursor, r[0], r[1], r[2] or "", r[3])
+    return len(rows)
+
+
+def _seed_csvs_to_db(cursor, paths_override: dict[str, str] | None = None) -> int:
+    """Load CSVs and upsert into seed_links. Returns number upserted."""
+    from youtube_client import load_all_seed_csvs
+
+    rows = load_all_seed_csvs(paths=paths_override)
+    return upsert_seed_links(cursor, rows)
 
 
 def _fetch_new(cursor, *, max_per_channel: int = 50, min_duration_sec: int = 300) -> int:
@@ -239,6 +291,7 @@ def _process_one(
             try:
                 idx.update_filterable_attributes(["podcast", "category", "video_id"])
                 idx.update_searchable_attributes(["title", "description", "framework_markdown"])
+                idx.update_sortable_attributes(["start_time_sec", "title", "category"])
             except Exception:
                 pass
         except Exception:
@@ -304,10 +357,60 @@ def _process_one(
     return True
 
 
+def run_seed_and_process_all(
+    *,
+    paths_override: dict[str, str] | None = None,
+    seed_link_rows: list[dict] | None = None,
+    from_db: bool = False,
+    work_dir: Path | None = None,
+    prompt_set: str = "operators",
+) -> dict:
+    """
+    Seed then process unprocessed videos. Returns {seeded, processed, video_ids}.
+    - seed_link_rows: upsert into seed_links, then seed-from-db and process-new.
+    - from_db: seed from seed_links into videos, then process-new.
+    - else: seed from CSVs (paths_override or DEFAULT_CSV_PATHS) into videos, then process-new.
+    Raises on missing DATABASE_URL.
+    """
+    import psycopg2
+
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise ValueError("DATABASE_URL not set")
+
+    conn = psycopg2.connect(db_url)
+    cur = conn.cursor()
+    seeded: int = 0
+    if seed_link_rows:
+        upsert_seed_links(cur, seed_link_rows)
+        conn.commit()
+        seeded = _seed_from_db(cur)
+        conn.commit()
+    elif from_db:
+        seeded = _seed_from_db(cur)
+        conn.commit()
+    else:
+        seeded = _seed_csvs(cur, paths_override=paths_override)
+        conn.commit()
+
+    rows = _get_unprocessed(cur)
+    cur.close()
+    conn.close()
+
+    processed = []
+    for vid, pod in rows:
+        ok = _process_one(vid, pod, work_dir=work_dir, prompt_set=prompt_set)
+        if ok:
+            processed.append(vid)
+    return {"seeded": seeded, "processed": len(processed), "video_ids": processed}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Operators Vault: seed CSVs, process videos (audio->transcribe->extract->store)")
     ap.add_argument("--seed-csvs", action="store_true", help="Load CSVs and upsert into videos")
-    ap.add_argument("--process-all", action="store_true", help="After --seed-csvs, process each video (audio->transcribe->extract->store)")
+    ap.add_argument("--seed-csvs-to-db", action="store_true", help="Load CSVs and upsert into seed_links (Supabase); does not touch videos")
+    ap.add_argument("--seed-from-db", action="store_true", help="Upsert from seed_links into videos; use with --process-new to run backfill from DB")
+    ap.add_argument("--process-all", action="store_true", help="After --seed-csvs or --seed-from-db, process unprocessed videos (audio->transcribe->extract->store)")
     ap.add_argument("--process", metavar="VIDEO_ID", help="Process one video: download audio, transcribe, extract insights, store")
     ap.add_argument("--podcast", default="9operators", choices=("9operators", "marketing_operator", "finance_operators"), help="For --process when video not in DB")
     ap.add_argument("--fetch-new", action="store_true", help="Fetch new videos from YouTube channels (9 Operators, Marketing, Finance) and upsert into videos. Requires YOUTUBE_API_KEY.")
@@ -319,27 +422,55 @@ def main() -> int:
     work_dir = Path(args.work_dir) if args.work_dir else None
     db_url = os.environ.get("DATABASE_URL")
 
+    if args.seed_csvs_to_db:
+        if not db_url:
+            print("DATABASE_URL not set; cannot seed-csvs-to-db.", flush=True)
+            return 1
+        import psycopg2
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        n = _seed_csvs_to_db(cur, paths_override=None)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"Upserted {n} rows into seed_links.", flush=True)
+        return 0
+
+    if args.seed_from_db:
+        if not db_url:
+            print("DATABASE_URL not set; cannot seed-from-db.", flush=True)
+            return 1
+        if args.process_all:
+            out = run_seed_and_process_all(from_db=True, work_dir=work_dir, prompt_set=args.prompt_set)
+            print(f"Seeded {out['seeded']} from seed_links; processed {out['processed']}.", flush=True)
+            return 0
+        import psycopg2
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        n = _seed_from_db(cur)
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"Seeded {n} videos from seed_links.", flush=True)
+        return 0
+
     if args.seed_csvs:
         if not db_url:
             print("DATABASE_URL not set; cannot seed.", flush=True)
             return 1
+        if args.process_all:
+            out = run_seed_and_process_all(paths_override=None, work_dir=work_dir, prompt_set=args.prompt_set)
+            print(f"Seeded {out['seeded']} videos; processed {out['processed']}.", flush=True)
+            return 0
         import psycopg2
 
         conn = psycopg2.connect(db_url)
         cur = conn.cursor()
-        n = _seed_csvs(cur)
+        n = _seed_csvs(cur, paths_override=None)
         conn.commit()
         cur.close()
         conn.close()
         print(f"Seeded {n} videos.", flush=True)
-
-        if args.process_all:
-            from youtube_client import load_all_seed_csvs
-
-            rows = load_all_seed_csvs()
-            for i, r in enumerate(rows):
-                print(f"[{i+1}/{len(rows)}] {r['video_id']} ({r['podcast']})", flush=True)
-                _process_one(r["video_id"], r["podcast"], work_dir=work_dir, prompt_set=args.prompt_set)
         return 0
 
     if args.process:

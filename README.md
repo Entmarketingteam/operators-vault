@@ -22,7 +22,7 @@ Podcast intelligence platform for **9 Operators**, **Marketing Operator**, and *
    ```
    Or: `psql "$DATABASE_URL" -f sql/schema.sql`. Or run `sql/schema.sql` in the Supabase SQL Editor.
 
-4. **Meilisearch:** Create an index per `meilisearch-setup.md` or run the pipeline (it will create the index if missing).
+4. **Meilisearch:** Create an index per `meilisearch-setup.md` or run the pipeline (it will create the index if missing). To push `MEILISEARCH_API_KEY` and `MEILISEARCH_HOST` to Railway from `.env`: `python scripts/set_railway_meilisearch.py` (needs `RAILWAY_API_TOKEN` in `.env`).
 
 ## Usage
 
@@ -40,6 +40,13 @@ python pipeline.py --seed-csvs
 ```bash
 python pipeline.py --seed-csvs --process-all
 ```
+
+**Store CSV links in Supabase** (then run backfill from DB without re-uploading):
+```bash
+python pipeline.py --seed-csvs-to-db    # CSVs from %USERPROFILE%\\Downloads\\ -> seed_links
+python pipeline.py --seed-from-db --process-all   # seed_links -> videos, then process unprocessed
+```
+Or from the API: `POST /seed-links/csv` to store; `POST /backfill` (no body) to run from `seed_links`.
 
 **Fetch new videos from YouTube channels** (9 Operators, Marketing, Finance; requires `YOUTUBE_API_KEY`):
 ```bash
@@ -68,7 +75,12 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 - `POST /process-new` — process all videos with no transcription yet  
 - `POST /sync` — run fetch-new then process-new in one call (for cron)  
 - `GET /health` — env and connectivity checks (database, youtube, meilisearch, deepgram, anthropic)  
-- `GET /search?q=...&podcast=9operators&category=...&video_id=...&limit=20` — search the insights vault via Meilisearch  
+- `GET /search?q=...&podcast=9operators&category=...&video_id=...&limit=20&sort=start_time_sec:asc` — search the insights vault via Meilisearch
+- `GET /search-ui` — simple HTML search UI
+- `POST /sync/async`, `POST /process-new/async` — like `/sync` and `/process-new` but return 202 with `job_id`; poll `GET /jobs/{job_id}` for status
+- `POST /seed-links` — JSON `{"links": [{video_id, podcast, title?, duration_seconds?, url?}]}`; upsert into `seed_links` (Supabase).  
+- `POST /seed-links/csv` — multipart CSVs (`9operators`, `marketing_operator`, `finance_operators`); upsert into `seed_links`.  
+- `POST /backfill` — run backfill from `seed_links`: seed into `videos` then process unprocessed. With optional CSV uploads: merge into `seed_links` first. With no body: use existing `seed_links`. Returns 202 + `job_id`; poll `GET /jobs/{job_id}`.  
 
 **n8n:**  
 - **Import via script** (after setting `N8N_HOST` and `N8N_API_KEY` in `.env`): `python scripts/import_n8n_workflow.py`  
@@ -83,12 +95,13 @@ In the HTTP Request node, set the URL to your Pipeline API (e.g. `https://your-a
 - `sql/schema.sql` – Supabase schema
 - `scripts/run_schema.py` – Apply schema (uses `DATABASE_URL` from `.env`)
 - `scripts/import_n8n_workflow.py` – Import `n8n-workflow.json` to n8n via API (`N8N_HOST`, `N8N_API_KEY`)
+- `scripts/set_railway_meilisearch.py` – Set `MEILISEARCH_API_KEY` and `MEILISEARCH_HOST` on Railway from `.env` (Railway GraphQL; `RAILWAY_API_TOKEN`)
 - `youtube_client.py` – Fetch from channels or parse CSVs
 - `audio_extractor.py` – Download audio (yt-dlp)
 - `deepgram_client.py` – Transcribe with diarization
 - `insight_extractor.py` – LLM extraction (Anthropic, Operators prompts)
 - `pipeline.py` – Orchestrator
-- `api.py` – FastAPI: `POST /process`, `POST /fetch-new`, `POST /process-new`, `POST /sync`, `GET /health`, `GET /search`
+- `api.py` – FastAPI: `POST /process`, `POST /fetch-new`, `POST /process-new`, `POST /sync`, `POST /sync/async`, `POST /process-new/async`, `POST /seed-links`, `POST /seed-links/csv`, `POST /backfill`, `GET /jobs/{job_id}`, `GET /health`, `GET /search`, `GET /search-ui`
 - `n8n-workflow.json` – n8n: one-off process video
 - `n8n-workflow-fetch-new.json` – n8n: cron every 6h, `POST /sync`
 - `scripts/run_all.py` – one-command: schema, optional --seed-csvs, fetch-new, process-new

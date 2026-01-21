@@ -76,3 +76,18 @@ CREATE TABLE IF NOT EXISTS video_people (
   person_id UUID NOT NULL REFERENCES people(id) ON DELETE CASCADE,
   PRIMARY KEY (video_id, person_id)
 );
+
+-- Seed links: canonical list of videos to process (from CSVs or API). Backfill reads from here.
+CREATE TABLE IF NOT EXISTS seed_links (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  video_id TEXT NOT NULL,
+  podcast TEXT NOT NULL,
+  title TEXT,
+  duration_seconds INT,
+  url TEXT,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(video_id, podcast)
+);
+CREATE INDEX IF NOT EXISTS idx_seed_links_video_id ON seed_links(video_id);
+CREATE INDEX IF NOT EXISTS idx_seed_links_podcast ON seed_links(podcast);

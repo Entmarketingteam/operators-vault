@@ -22,7 +22,7 @@
 | run_schema | Applies `sql/schema.sql`; splits by `;`; .env fallback |
 | youtube_client | load_from_csv, load_all_seed_csvs, resolve_channel_id, fetch_channel_videos (published_at), get_channel_handle; DEFAULT_CHANNEL_HANDLES; YOUTUBE_CHANNEL_* override |
 | pipeline | --seed-csvs, --seed-csvs --process-all, --process, --fetch-new, --process-new; _ensure_video(channel_id, published_at); _fetch_new, _get_unprocessed |
-| api | POST /process, /fetch-new, /process-new, /sync; GET /health, /search, / |
+| api | POST /process, /fetch-new, /process-new, /sync, /sync/async, /process-new/async; GET /jobs/{id}, /health, /search, /search-ui, / |
 | Prompts | extract_insights_system, make_framework_content, timestamp_extraction, title_generation (operators) |
 | n8n | n8n-workflow.json (process one), n8n-workflow-fetch-new.json (cron → /sync) |
 | Scripts | run_schema, run_all (schema + fetch-new + process-new; --seed-csvs, --schema-only), import_n8n_workflow, install_wheels |
@@ -39,9 +39,9 @@
 
 ## Next Steps (When Picking Up)
 
-1. **Meilisearch:** Fix `MEILISEARCH_API_KEY` on Railway (key with search on `operators_insights`). Then `GET /search?q=...` works.
+1. **Meilisearch:** Fix `MEILISEARCH_API_KEY` on Railway (key with search on `operators_insights`). See `meilisearch-setup.md` § "Fix `/search` on Railway". Then `GET /search?q=...` and `/search-ui` work.
 2. **Optional backfill:** `python pipeline.py --seed-csvs --process-all` (CSVs in `%USERPROFILE%\Downloads\`).
-3. **If “keep building”:** background/async for `POST /process-new` and `POST /sync` (202 + job); simple UI for /search; more filters/ordering on /search.
+3. **If “keep building”:** (done) `POST /sync/async`, `POST /process-new/async` (202 + job), `GET /jobs/{job_id}`; `GET /search-ui`; `?sort=` on `/search`. Further: more filters, or wire n8n to `/sync/async`.
 
 ---
 

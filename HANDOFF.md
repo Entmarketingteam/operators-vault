@@ -4,6 +4,18 @@
 
 ---
 
+## Resume in New Chat
+
+When you come back in a new chat, you can resume with:
+
+> Read HANDOFF.md and PLAN.md in operators-vault and continue from the Next steps there.
+
+Or:
+
+> Open C:\Users\ethan.atchley\operators-vault, read HANDOFF.md then PLAN.md, and pick up from the Next steps.
+
+---
+
 ## 1. What This Project Is
 
 Podcast intelligence for **9 Operators**, **Marketing Operator**, **Finance Operator**: YouTube → audio → Deepgram transcription → LLM insight extraction (Anthropic) → Supabase + Meilisearch. CSVs seed initial videos; `--fetch-new` pulls new episodes from YouTube channels; `--process-new` runs the pipeline on unprocessed videos.
@@ -12,9 +24,9 @@ Podcast intelligence for **9 Operators**, **Marketing Operator**, **Finance Oper
 
 ## 2. Where We Are (Current State)
 
-- **Implemented and committed:** Schema, pipeline (seed, process, fetch-new, process-new), API (process, fetch-new, process-new, sync, health, search), youtube_client (CSVs + YouTube Data API), prompts, run_schema, run_all, n8n workflows, install_wheels workaround.
+- **Implemented and committed:** Schema, pipeline (seed, process, fetch-new, process-new), API (process, fetch-new, process-new, sync, sync/async, process-new/async, jobs, health, search, search-ui), youtube_client (CSVs + YouTube Data API), prompts, run_schema, run_all, n8n workflows, install_wheels workaround. `/search` supports `?sort=`. `meilisearch-setup.md` has Railway fix for `invalid_api_key`.
 - **Railway:** https://superb-smile-production.up.railway.app — `DATABASE_URL` = Supabase **Session pooler** (aws-0-us-west-2). `/health` all ok; `POST /sync` works; **Operators Vault – Sync New Episodes** in n8n is updated and **Active** (every 6h). `GET /search` can return `invalid_api_key` if `MEILISEARCH_API_KEY` on Railway is wrong or lacks search rights—fix in Meilisearch/Railway if needed.
-- **Optional:** `--seed-csvs --process-all` for CSV backfill (CSVs in `%USERPROFILE%\Downloads\`); run where DB is reachable.
+- **Optional:** Store links in Supabase: `POST /seed-links/csv` or `pipeline.py --seed-csvs-to-db`. Then `POST /backfill` (no body) or `--seed-from-db --process-all` runs from `seed_links` (no CSV upload needed).
 
 ---
 
@@ -28,8 +40,9 @@ Podcast intelligence for **9 Operators**, **Marketing Operator**, **Finance Oper
   - `README.md` – Setup and usage
   - `HANDOFF.md` – This file
   - `api.py` – FastAPI app
-  - `pipeline.py` – CLI: --seed-csvs, --process-all, --process, --fetch-new, --process-new
+  - `pipeline.py` – CLI: --seed-csvs, --seed-csvs-to-db, --seed-from-db, --process, --fetch-new, --process-new
   - `youtube_client.py` – CSVs + resolve_channel_id, fetch_channel_videos
+  - `sql/schema.sql` – includes `seed_links` (store CSV links in Supabase; backfill reads from here)
   - `scripts/run_schema.py` – Apply `sql/schema.sql`
   - `scripts/run_all.py` – schema + fetch-new + process-new (optional --seed-csvs)
 
@@ -97,4 +110,4 @@ python -m uvicorn api:app --host 0.0.0.0 --port 8000
 
 - **App:** https://superb-smile-production.up.railway.app  
 - **DB:** `DATABASE_URL` = Supabase **Session pooler** (e.g. `aws-0-us-west-2.pooler.supabase.com:5432`). Get from Supabase: **Project Settings → Database → Connection string → Pooler settings → Session**.  
-- **Meilisearch:** If `GET /search` returns `invalid_api_key`, set `MEILISEARCH_API_KEY` in Railway to a key with **search** (and index) on `operators_insights`.
+- **Meilisearch:** If `GET /search` returns `invalid_api_key`, set `MEILISEARCH_API_KEY` in Railway to a key with **search** (and index) on `operators_insights`. From project root, with `RAILWAY_API_TOKEN` and Meilisearch keys in `.env`: `python scripts/set_railway_meilisearch.py` (uses Railway GraphQL API).

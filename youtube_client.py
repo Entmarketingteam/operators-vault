@@ -92,6 +92,7 @@ def load_from_csv(
                 "title": title,
                 "duration_seconds": duration_sec,
                 "podcast": podcast,
+                "url": url or "",
             })
     return out
 
