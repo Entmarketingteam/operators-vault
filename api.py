@@ -237,18 +237,18 @@ def health():
             checks["meilisearch"] = "ok"
         except Exception as e:
             err = str(e).strip()
-            # Prefer get_indexes() so we don't require operators_insights to exist
+            # Fallback: try get_indexes() so we don't require operators_insights to exist
             try:
                 client.get_indexes()
                 checks["meilisearch"] = "ok"
             except Exception as e2:
                 err2 = str(e2).strip()
                 if "no Route matched" in err2 or "404" in err2:
-                    checks["meilisearch"] = "error: wrong MEILISEARCH_HOST or API key (see meilisearch-setup.md)"
+                    checks["meilisearch"] = f"error: {err2[:220]}"
                 elif "SSL" in err2 or "certificate" in err2.lower():
                     checks["meilisearch"] = "error: SSL/certificate issue with Meilisearch host"
                 else:
-                    checks["meilisearch"] = f"error: {err2[:180]}"
+                    checks["meilisearch"] = f"error: {err2[:220]}"
 
     status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
     return {"status": status, "checks": checks}
