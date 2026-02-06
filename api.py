@@ -440,12 +440,57 @@ def get_job(job_id: str):
     return out
 
 
+@app.get("/stats")
+def stats():
+    """Vault index status: per-podcast counts of videos in DB, processed (have transcription), and unprocessed. Use to see if 9 Operators / Marketing Operator are fully pulled and indexed."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    try:
+        conn = psycopg2.connect(db_url)
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT v.podcast,
+                       COUNT(*) AS videos,
+                       COUNT(t.id) AS processed
+                FROM videos v
+                LEFT JOIN transcriptions t ON t.video_id = v.video_id
+                GROUP BY v.podcast
+                ORDER BY v.podcast
+                """
+            )
+            rows = cur.fetchall()
+            by_podcast = {}
+            for podcast, videos, processed in rows:
+                by_podcast[podcast] = {
+                    "videos": videos,
+                    "processed": processed,
+                    "unprocessed": videos - processed,
+                    "all_indexed": videos > 0 and processed == videos,
+                }
+            cur.execute("SELECT podcast, COUNT(*) FROM seed_links GROUP BY podcast ORDER BY podcast")
+            seed_rows = cur.fetchall()
+            seed_by_podcast = {p: c for p, c in seed_rows}
+            for p in by_podcast:
+                by_podcast[p]["seed_links"] = seed_by_podcast.get(p, 0)
+            return {"by_podcast": by_podcast}
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stats failed: {e!s}")
+
+
 @app.get("/")
 def root():
     return {
         "service": "Operators Vault Pipeline API",
         "docs": "/docs",
         "health": "/health",
+        "stats": "/stats",
         "search": "/search",
         "search_ui": "/search-ui",
         "sync": "POST /sync",

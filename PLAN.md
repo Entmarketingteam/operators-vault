@@ -11,6 +11,7 @@
 - CLI and HTTP API for: seed, process one, process all, **fetch-new** (YouTube channels), **process-new** (only unprocessed).
 - n8n workflows for one-off process and **cron sync** (fetch-new + process-new).
 - Searchable vault: `GET /search` over Meilisearch.
+- **Hosted and working like mfmvault.com:** Custom domain, public search UI at that URL, n8n sync running. See **`HOSTING.md`**.
 
 ---
 
@@ -39,9 +40,10 @@
 
 ## Next Steps (When Picking Up)
 
-1. **Meilisearch:** Fix `MEILISEARCH_API_KEY` on Railway (key with search on `operators_insights`). See `meilisearch-setup.md` § "Fix `/search` on Railway". Then `GET /search?q=...` and `/search-ui` work.
-2. **Optional backfill:** `python pipeline.py --seed-csvs --process-all` (CSVs in `%USERPROFILE%\Downloads\`).
-3. **If “keep building”:** (done) `POST /sync/async`, `POST /process-new/async` (202 + job), `GET /jobs/{job_id}`; `GET /search-ui`; `?sort=` on `/search`. Further: more filters, or wire n8n to `/sync/async`.
+1. **Host like mfmvault.com:** Follow **`HOSTING.md`**: add custom domain in Railway, point DNS (CNAME) at Railway, fix `MEILISEARCH_API_KEY` so `/search-ui` works. Optionally point n8n at the new URL.
+2. **Meilisearch:** If `/search` still returns `invalid_api_key`, fix `MEILISEARCH_API_KEY` on Railway (key with search on `operators_insights`). See `meilisearch-setup.md` § "Fix `/search` on Railway". Then `GET /search?q=...` and `/search-ui` work.
+3. **Optional backfill:** `python pipeline.py --seed-csvs --process-all` (CSVs in `%USERPROFILE%\Downloads\`).
+4. **If “keep building”:** (done) `POST /sync/async`, `POST /process-new/async` (202 + job), `GET /jobs/{job_id}`; `GET /search-ui`; `?sort=` on `/search`. Further: more filters, or wire n8n to `/sync/async`.
 
 ---
 

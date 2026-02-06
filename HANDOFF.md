@@ -27,6 +27,7 @@ Podcast intelligence for **9 Operators**, **Marketing Operator**, **Finance Oper
 - **Implemented and committed:** Schema, pipeline (seed, process, fetch-new, process-new), API (process, fetch-new, process-new, sync, sync/async, process-new/async, jobs, health, search, search-ui), youtube_client (CSVs + YouTube Data API), prompts, run_schema, run_all, n8n workflows, install_wheels workaround. `/search` supports `?sort=`. `meilisearch-setup.md` has Railway fix for `invalid_api_key`.
 - **Railway:** https://superb-smile-production.up.railway.app — `DATABASE_URL` = Supabase **Session pooler** (aws-0-us-west-2). `/health` all ok; `POST /sync` works; **Operators Vault – Sync New Episodes** in n8n is updated and **Active** (every 6h). `GET /search` can return `invalid_api_key` if `MEILISEARCH_API_KEY` on Railway is wrong or lacks search rights—fix in Meilisearch/Railway if needed.
 - **Optional:** Store links in Supabase: `POST /seed-links/csv` or `pipeline.py --seed-csvs-to-db`. Then `POST /backfill` (no body) or `--seed-from-db --process-all` runs from `seed_links` (no CSV upload needed).
+- **Hosting (like mfmvault.com):** App is on Railway at `superb-smile-production.up.railway.app`. To serve it at a custom domain (e.g. operatorsvault.com): add the domain in Railway, point DNS (CNAME) at Railway, fix `MEILISEARCH_API_KEY` so `/search-ui` works. Full steps: **`HOSTING.md`**.
 
 ---
 
@@ -39,6 +40,7 @@ Podcast intelligence for **9 Operators**, **Marketing Operator**, **Finance Oper
   - `PROGRESS.md` – Done / Not done / How to run / Env / CSV paths
   - `README.md` – Setup and usage
   - `HANDOFF.md` – This file
+  - `HOSTING.md` – Custom domain + “hosted like mfmvault.com” checklist
   - `api.py` – FastAPI app
   - `pipeline.py` – CLI: --seed-csvs, --seed-csvs-to-db, --seed-from-db, --process, --fetch-new, --process-new
   - `youtube_client.py` – CSVs + resolve_channel_id, fetch_channel_videos
