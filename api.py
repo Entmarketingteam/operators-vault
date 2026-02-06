@@ -231,12 +231,14 @@ def health():
         checks["meilisearch"] = "missing"
     else:
         try:
-            client.health()
+            # Use index search instead of client.health() — /health can 404 on some Meilisearch Cloud setups
+            idx = client.index("operators_insights")
+            idx.search("", {"limit": 0})
             checks["meilisearch"] = "ok"
         except Exception as e:
             err = str(e).strip()
             if "no Route matched" in err or "404" in err:
-                checks["meilisearch"] = "error: wrong MEILISEARCH_HOST URL or API version"
+                checks["meilisearch"] = "error: wrong MEILISEARCH_HOST URL or API key (see meilisearch-setup.md)"
             else:
                 checks["meilisearch"] = f"error: {err[:200]}"
 
@@ -463,7 +465,7 @@ def stats():
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
-        conn = psycopg2.connect(db_url)
+        conn = psycopg2.connect(db_url, connect_timeout=15)
         cur = conn.cursor()
         try:
             cur.execute(
@@ -486,11 +488,15 @@ def stats():
                     "unprocessed": videos - processed,
                     "all_indexed": videos > 0 and processed == videos,
                 }
-            cur.execute("SELECT podcast, COUNT(*) FROM seed_links GROUP BY podcast ORDER BY podcast")
-            seed_rows = cur.fetchall()
-            seed_by_podcast = {p: c for p, c in seed_rows}
-            for p in by_podcast:
-                by_podcast[p]["seed_links"] = seed_by_podcast.get(p, 0)
+            try:
+                cur.execute("SELECT podcast, COUNT(*) FROM seed_links GROUP BY podcast ORDER BY podcast")
+                seed_rows = cur.fetchall()
+                seed_by_podcast = {p: c for p, c in seed_rows}
+                for p in by_podcast:
+                    by_podcast[p]["seed_links"] = seed_by_podcast.get(p, 0)
+            except Exception:
+                for p in by_podcast:
+                    by_podcast[p]["seed_links"] = 0
             return {"by_podcast": by_podcast}
         finally:
             cur.close()
