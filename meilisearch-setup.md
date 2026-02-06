@@ -66,7 +66,7 @@ If `GET /search` returns `invalid_api_key` from Meilisearch:
    - `actions = ['search', 'documents.add', 'documents.update', ...]` (at least `search` for `/search`; `documents.*` for the pipeline).
 2. **Railway:** Project → **superb-smile** (or your service) → **Variables** → set:
    - `MEILISEARCH_API_KEY` = that key (replace any wrong or placeholder).
-   - `MEILISEARCH_HOST` = `https://ms-9c9b9506a325-38835.nyc.meilisearch.io` (or your Meilisearch host) if not set.  
+   - `MEILISEARCH_HOST` = your Meilisearch host URL **with no trailing slash and no path** (e.g. `https://ms-9c9b9506a325-38835.nyc.meilisearch.io`). If you see "no Route matched", the host is likely wrong (e.g. extra path or wrong API URL).
    **Or from project root** (with `RAILWAY_API_TOKEN`, `MEILISEARCH_API_KEY`, `MEILISEARCH_HOST` in `.env`):  
    `python scripts/set_railway_meilisearch.py` — uses Railway GraphQL API to set both variables.
 3. **Redeploy** so the new env is picked up (Railway often auto-deploys on variable change), then try `GET /search?q=test`.

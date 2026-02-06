@@ -4,6 +4,26 @@ Get the app live at a custom domain so people can use the search UI and n8n can 
 
 ---
 
+## Get everything working first (deploy + search)
+
+1. **Deploy the latest code**  
+   - If the repo is connected to Railway: push to `master` and wait for the deploy, or in Railway → **Deployments** → **Redeploy** (or **Deploy** from the latest commit).  
+   - Or with [Railway CLI](https://docs.railway.app/develop/cli): `railway login`, then in the project folder run `railway up`.
+
+2. **Fix Meilisearch on Railway** (so `/search` and `/search-ui` work)  
+   - Railway → your service → **Variables**.  
+   - Set `MEILISEARCH_HOST` = your Meilisearch URL **with no trailing slash** (e.g. `https://ms-xxxx.meilisearch.io`).  
+   - Set `MEILISEARCH_API_KEY` = a key that has **search** (and index) on the `operators_insights` index.  
+   - If you see "no Route matched", the host URL is wrong (no path, no trailing slash). See `meilisearch-setup.md`.  
+   - Redeploy after changing variables if Railway doesn’t auto-redeploy.
+
+3. **Verify**  
+   - `https://superb-smile-production.up.railway.app/health` — all checks ok.  
+   - `https://superb-smile-production.up.railway.app/stats` — shows per-podcast index status.  
+   - `https://superb-smile-production.up.railway.app/search-ui` — search works.
+
+---
+
 ## Current state
 
 - **Railway app:** https://superb-smile-production.up.railway.app  

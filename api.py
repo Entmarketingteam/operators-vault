@@ -36,6 +36,19 @@ from pipeline import _fetch_new, _get_unprocessed, _process_one, run_seed_and_pr
 
 app = FastAPI(title="Operators Vault Pipeline API", version="1.0.0")
 
+
+def _meilisearch_client():
+    """Return (MeiliClient, host_used) or (None, None). Normalizes MEILISEARCH_HOST (strip trailing slash)."""
+    ms_host = (os.environ.get("MEILISEARCH_HOST") or "").strip().rstrip("/")
+    ms_key = (os.environ.get("MEILISEARCH_API_KEY") or "").strip()
+    if not ms_host or not ms_key:
+        return None, None
+    try:
+        from meilisearch import Client as MeiliClient
+        return MeiliClient(ms_host, ms_key), ms_host
+    except Exception:
+        return None, None
+
 # In-memory job store for async /sync and /process-new (202). Lost on restart.
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
@@ -213,18 +226,19 @@ def health():
     checks["deepgram"] = "ok" if os.environ.get("DEEPGRAM_API_KEY") else "missing"
     checks["anthropic"] = "ok" if os.environ.get("ANTHROPIC_API_KEY") else "missing"
 
-    ms_host = os.environ.get("MEILISEARCH_HOST")
-    ms_key = os.environ.get("MEILISEARCH_API_KEY")
-    if not ms_host or not ms_key:
+    client, _ = _meilisearch_client()
+    if client is None:
         checks["meilisearch"] = "missing"
     else:
         try:
-            from meilisearch import Client as MeiliClient
-            c = MeiliClient(ms_host, ms_key)
-            c.health()
+            client.health()
             checks["meilisearch"] = "ok"
         except Exception as e:
-            checks["meilisearch"] = f"error: {e!s}"
+            err = str(e).strip()
+            if "no Route matched" in err or "404" in err:
+                checks["meilisearch"] = "error: wrong MEILISEARCH_HOST URL or API version"
+            else:
+                checks["meilisearch"] = f"error: {err[:200]}"
 
     status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
     return {"status": status, "checks": checks}
@@ -240,15 +254,16 @@ def search(
     sort: str | None = None,
 ):
     """Search the insights vault via Meilisearch. Params: q, podcast, category, video_id, limit (default 20), sort (e.g. start_time_sec:asc or title:desc)."""
-    ms_host = os.environ.get("MEILISEARCH_HOST")
-    ms_key = os.environ.get("MEILISEARCH_API_KEY")
-    if not ms_host or not ms_key:
+    client, _ = _meilisearch_client()
+    if client is None:
         raise HTTPException(status_code=503, detail="MEILISEARCH_HOST or MEILISEARCH_API_KEY not set")
     try:
-        from meilisearch import Client as MeiliClient
-        idx = MeiliClient(ms_host, ms_key).index("operators_insights")
+        idx = client.index("operators_insights")
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Meilisearch: {e!s}")
+        err = str(e).strip()
+        if "no Route matched" in err or "404" in err:
+            raise HTTPException(status_code=503, detail="Meilisearch: wrong MEILISEARCH_HOST URL or API key (see meilisearch-setup.md)")
+        raise HTTPException(status_code=503, detail=f"Meilisearch: {err[:200]}")
 
     filters: list[str] = []
     if podcast:
