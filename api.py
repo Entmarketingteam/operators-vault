@@ -27,8 +27,11 @@ except ImportError:
                     os.environ.setdefault(k.strip(), v.strip())
 
 import tempfile
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 # Import after dotenv
@@ -36,18 +39,48 @@ from pipeline import _fetch_new, _get_unprocessed, _process_one, run_seed_and_pr
 
 app = FastAPI(title="Operators Vault Pipeline API", version="1.0.0")
 
+# CORS so Vercel (and other) front ends can call /search
+_cors_origins = os.environ.get("CORS_ORIGINS", "*").strip()
+_origins_list = [o.strip() for o in _cors_origins.split(",") if o.strip()] if _cors_origins != "*" else ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_origins_list,
+    allow_credentials=(_origins_list != ["*"]),
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 
-def _meilisearch_client():
-    """Return (MeiliClient, host_used) or (None, None). Normalizes MEILISEARCH_HOST (strip trailing slash)."""
-    ms_host = (os.environ.get("MEILISEARCH_HOST") or "").strip().rstrip("/")
-    ms_key = (os.environ.get("MEILISEARCH_API_KEY") or "").strip()
-    if not ms_host or not ms_key:
-        return None, None
+app.mount("/static", StaticFiles(directory=str(_root / "static")), name="static")
+
+
+def _render_search_ui() -> str:
+    path = _root / "templates" / "search.html"
+    if not path.exists():
+        return "<!DOCTYPE html><html><body><h1>Operators Vault</h1><p>Template not found.</p></body></html>"
+    html = path.read_text(encoding="utf-8")
+    return html.replace("{{ static_prefix }}", "/static").replace("{{ api_base }}", "").replace("{{ request.url_for('search_ui') }}", "/search-ui")
+_security = HTTPBearer(auto_error=False)
+
+
+def _verify_supabase_jwt(credentials: HTTPAuthorizationCredentials | None = Depends(_security)):
+    """Require valid Supabase JWT for private search. Set SUPABASE_JWT_SECRET in env."""
+    secret = os.environ.get("SUPABASE_JWT_SECRET") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    if not secret:
+        raise HTTPException(status_code=503, detail="SUPABASE_JWT_SECRET not configured")
+    if not credentials or credentials.credentials is None:
+        raise HTTPException(status_code=401, detail="Authorization required (Bearer token from Supabase Auth)")
     try:
-        from meilisearch import Client as MeiliClient
-        return MeiliClient(ms_host, ms_key), ms_host
+        import jwt
+        payload = jwt.decode(
+            credentials.credentials,
+            secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+            options={"verify_aud": False},
+        )
+        return payload
     except Exception:
-        return None, None
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 # In-memory job store for async /sync and /process-new (202). Lost on restart.
 _jobs: dict[str, dict] = {}
@@ -207,9 +240,8 @@ def process_new():
 
 @app.get("/health")
 def health():
-    """Check env and connectivity: database, youtube, meilisearch, deepgram, anthropic. Returns 200 with status dict."""
+    """Check env and connectivity: database, youtube, deepgram, anthropic. Search is Postgres FTS (no Meilisearch)."""
     checks: dict[str, str] = {}
-    # Database
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         checks["database"] = "missing"
@@ -225,33 +257,81 @@ def health():
     checks["youtube"] = "ok" if os.environ.get("YOUTUBE_API_KEY") else "missing"
     checks["deepgram"] = "ok" if os.environ.get("DEEPGRAM_API_KEY") else "missing"
     checks["anthropic"] = "ok" if os.environ.get("ANTHROPIC_API_KEY") else "missing"
-
-    client, _ = _meilisearch_client()
-    if client is None:
-        checks["meilisearch"] = "missing"
-    else:
-        try:
-            # Use index search instead of client.health() — /health can 404 on some Meilisearch Cloud setups
-            idx = client.index("operators_insights")
-            idx.search("", {"limit": 0})
-            checks["meilisearch"] = "ok"
-        except Exception as e:
-            err = str(e).strip()
-            # Fallback: try get_indexes() so we don't require operators_insights to exist
-            try:
-                client.get_indexes()
-                checks["meilisearch"] = "ok"
-            except Exception as e2:
-                err2 = str(e2).strip()
-                if "no Route matched" in err2 or "404" in err2:
-                    checks["meilisearch"] = f"error: {err2[:220]}"
-                elif "SSL" in err2 or "certificate" in err2.lower():
-                    checks["meilisearch"] = "error: SSL/certificate issue with Meilisearch host"
-                else:
-                    checks["meilisearch"] = f"error: {err2[:220]}"
+    checks["search"] = "postgres"
 
     status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
     return {"status": status, "checks": checks}
+
+
+def _search_postgres(
+    q: str,
+    podcast: str | None = None,
+    category: str | None = None,
+    video_id: str | None = None,
+    limit: int = 20,
+    type_: str = "insights",
+) -> dict:
+    """Run Postgres FTS search (search_insights and/or search_moments). Returns {query, total, hits}."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    limit = min(limit, 100)
+    hits: list[dict] = []
+    if type_ in ("insights", "all") and q and q.strip():
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "SELECT id, video_id, podcast, category, title, description, start_time_sec, end_time_sec, rank, headline_title, headline_description FROM search_insights(%s, %s, 0, %s, %s, %s)",
+                (q.strip(), limit, podcast, category, video_id),
+            )
+            for row in cur.fetchall():
+                hits.append({
+                    "type": "insight",
+                    "id": str(row[0]),
+                    "video_id": row[1],
+                    "podcast": row[2],
+                    "category": row[3],
+                    "title": row[4],
+                    "description": row[5],
+                    "start_time_sec": float(row[6]) if row[6] is not None else None,
+                    "end_time_sec": float(row[7]) if row[7] is not None else None,
+                    "rank": float(row[8]) if row[8] is not None else 0,
+                    "headline_title": row[9],
+                    "headline_description": row[10],
+                })
+        finally:
+            cur.close()
+            conn.close()
+    if type_ in ("moments", "all") and q and q.strip():
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                "SELECT id, video_id, podcast, start_time_sec, end_time_sec, text, speaker_label, rank, headline FROM search_moments(%s, %s, 0, %s, %s)",
+                (q.strip(), limit, podcast, video_id),
+            )
+            for row in cur.fetchall():
+                hits.append({
+                    "type": "moment",
+                    "id": str(row[0]),
+                    "video_id": row[1],
+                    "podcast": row[2],
+                    "start_time_sec": float(row[3]) if row[3] is not None else None,
+                    "end_time_sec": float(row[4]) if row[4] is not None else None,
+                    "text": row[5],
+                    "speaker_label": row[6],
+                    "rank": float(row[7]) if row[7] is not None else 0,
+                    "headline": row[8],
+                })
+        finally:
+            cur.close()
+            conn.close()
+    if type_ == "all" and hits:
+        hits.sort(key=lambda h: h.get("rank") or 0, reverse=True)
+        hits = hits[:limit]
+    return {"query": q or "(all)", "total": len(hits), "hits": hits}
 
 
 @app.get("/search")
@@ -261,101 +341,17 @@ def search(
     category: str | None = None,
     video_id: str | None = None,
     limit: int = 20,
-    sort: str | None = None,
+    type_: str = "insights",
+    _: dict = Depends(_verify_supabase_jwt),
 ):
-    """Search the insights vault via Meilisearch. Params: q, podcast, category, video_id, limit (default 20), sort (e.g. start_time_sec:asc or title:desc)."""
-    client, _ = _meilisearch_client()
-    if client is None:
-        raise HTTPException(status_code=503, detail="MEILISEARCH_HOST or MEILISEARCH_API_KEY not set")
-    try:
-        idx = client.index("operators_insights")
-    except Exception as e:
-        err = str(e).strip()
-        if "no Route matched" in err or "404" in err:
-            raise HTTPException(status_code=503, detail="Meilisearch: wrong MEILISEARCH_HOST URL or API key (see meilisearch-setup.md)")
-        raise HTTPException(status_code=503, detail=f"Meilisearch: {err[:200]}")
-
-    filters: list[str] = []
-    if podcast:
-        filters.append(f'podcast = "{podcast}"')
-    if category:
-        filters.append(f'category = "{category}"')
-    if video_id:
-        filters.append(f'video_id = "{video_id}"')
-    filter_str = " AND ".join(filters) if filters else None
-
-    opts: dict = {"limit": min(limit, 100), "filter": filter_str}
-    if sort:
-        parts = [s.strip() for s in sort.split(",") if s.strip()]
-        if parts:
-            opts["sort"] = parts
-
-    try:
-        res = idx.search(q or "", opts)
-        return {"query": q or "(all)", "total": res.get("estimatedTotalHits", 0), "hits": res.get("hits", [])}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Search failed: {e!s}")
-
-
-_SEARCH_UI_HTML = """<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Operators Vault – Search</title>
-<style>
-  body { font-family: system-ui,sans-serif; max-width: 720px; margin: 1.5rem auto; padding: 0 1rem; }
-  input, select { padding: 0.4rem; margin: 0 0.5rem 0.5rem 0; }
-  button { padding: 0.5rem 1rem; cursor: pointer; }
-  .hit { border: 1px solid #eee; border-radius: 6px; padding: 0.75rem; margin: 0.5rem 0; }
-  .hit h4 { margin: 0 0 0.25rem 0; }
-  .meta { font-size: 0.85rem; color: #555; }
-  .err { color: #c00; }
-  a { color: #06c; }
-</style>
-</head><body>
-<h1>Operators Vault – Search</h1>
-<form id="f">
-  <input name="q" type="search" placeholder="Search…" size="30">
-  <select name="podcast"><option value="">All podcasts</option>
-    <option value="9operators">9 Operators</option>
-    <option value="marketing_operator">Marketing Operator</option>
-    <option value="finance_operators">Finance Operators</option>
-  </select>
-  <input name="limit" type="number" value="20" min="1" max="100" style="width:4rem">
-  <button type="submit">Search</button>
-</form>
-<div id="out"></div>
-<script>
-  document.getElementById('f').onsubmit = async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const params = new URLSearchParams();
-    if (fd.get('q')) params.set('q', fd.get('q'));
-    if (fd.get('podcast')) params.set('podcast', fd.get('podcast'));
-    params.set('limit', fd.get('limit') || '20');
-    const out = document.getElementById('out');
-    out.innerHTML = 'Loading…';
-    try {
-      const r = await fetch('/search?' + params);
-      const j = await r.json();
-      if (!r.ok) { out.innerHTML = '<p class="err">' + (j.detail || r.status) + '</p>'; return; }
-      let html = '<p><strong>' + j.total + '</strong> result(s)</p>';
-      (j.hits || []).forEach(h => {
-        const y = 'https://www.youtube.com/watch?v=' + (h.video_id || '');
-        html += '<div class="hit"><h4>' + (h.title || '(no title)') + '</h4>';
-        html += '<p class="meta">' + (h.podcast || '') + ' · ' + (h.category || '') + ' · <a href="' + y + '" target="_blank">' + (h.video_id || '') + '</a></p>';
-        if (h.description) html += '<p>' + h.description + '</p>';
-        html += '</div>';
-      });
-      out.innerHTML = html || '<p>No hits.</p>';
-    } catch (err) { out.innerHTML = '<p class="err">' + err + '</p>'; }
-  };
-</script>
-</body></html>
-"""
+    """Search insights and/or timestamp moments via Postgres FTS. Requires Bearer token (Supabase Auth). Params: q, podcast, category, video_id, limit, type=insights|moments|all."""
+    return _search_postgres(q, podcast=podcast, category=category, video_id=video_id, limit=limit, type_=type_)
 
 
 @app.get("/search-ui", response_class=HTMLResponse)
 def search_ui():
-    """Simple HTML UI for GET /search. Query, podcast filter, limit."""
-    return _SEARCH_UI_HTML
+    """Search UI: sign in (token), filters, and result cards. Uses templates/search.html and static assets."""
+    return _render_search_ui()
 
 
 @app.post("/sync")

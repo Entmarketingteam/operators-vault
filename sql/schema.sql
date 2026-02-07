@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS transcriptions (
 
 CREATE INDEX IF NOT EXISTS idx_transcriptions_video_id ON transcriptions(video_id);
 
--- Segments: time-bounded utterances (optional; for diarization/segments)
+-- Segments: time-bounded utterances (optional, for diarization/segments)
 CREATE TABLE IF NOT EXISTS segments (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   transcription_id UUID REFERENCES transcriptions(id) ON DELETE CASCADE,
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS segments (
 
 CREATE INDEX IF NOT EXISTS idx_segments_transcription_id ON segments(transcription_id);
 
--- Insights: extracted per chunk; category and podcast for filtering
+-- Insights: extracted per chunk, category and podcast for filtering
 CREATE TABLE IF NOT EXISTS insights (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   video_id TEXT NOT NULL REFERENCES videos(video_id) ON DELETE CASCADE,
@@ -62,7 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_insights_video_id ON insights(video_id);
 CREATE INDEX IF NOT EXISTS idx_insights_podcast ON insights(podcast);
 CREATE INDEX IF NOT EXISTS idx_insights_category ON insights(category);
 
--- People: optional; guests/speakers for future linking
+-- People: optional, guests/speakers for future linking
 CREATE TABLE IF NOT EXISTS people (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,

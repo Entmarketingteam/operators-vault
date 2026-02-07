@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Operators Vault – Search</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/vault.css">
+</head>
+<body>
+  <div class="vault-app">
+    <header class="vault-header">
+      <div class="vault-header-inner">
+        <a href="/" class="vault-logo">Operators <span>Vault</span></a>
+        <div class="vault-auth">
+          <div class="token-wrap">
+            <input type="password" id="token" placeholder="Paste Supabase access token" title="From Supabase Auth after sign-in" autocomplete="off">
+            <button type="button" class="vault-btn vault-btn-primary" onclick="document.getElementById('vault-search-form').requestSubmit()">Search</button>
+          </div>
+          <span class="sign-in-hint">Sign in at Supabase (email or Google), then paste token here.</span>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="vault-hero">
+        <h1>Search Operators Vault</h1>
+        <p class="subtitle">Explore insights and moments from 9 Operators, Marketing Operator, and Finance Operator.</p>
+        <form id="vault-search-form" onsubmit="event.preventDefault(); window.VaultSearch();">
+          <div class="vault-search-bar">
+            <input type="search" name="q" placeholder="Try 'pricing' or 'framework'…" autofocus aria-label="Search">
+            <button type="submit" class="vault-btn vault-btn-primary">Search</button>
+          </div>
+          <div class="vault-filters">
+            <label for="podcast">Podcast</label>
+            <select id="podcast" name="podcast">
+              <option value="">All</option>
+              <option value="9operators">9 Operators</option>
+              <option value="marketing_operator">Marketing Operator</option>
+              <option value="finance_operators">Finance Operators</option>
+            </select>
+            <label for="type_">Type</label>
+            <select id="type_" name="type_">
+              <option value="insights">Insights</option>
+              <option value="moments">Moments</option>
+              <option value="all">All</option>
+            </select>
+            <label for="category">Category</label>
+            <select id="category" name="category">
+              <option value="">Any</option>
+              <option value="Frameworks and exercises">Frameworks and exercises</option>
+              <option value="Points of view">Points of view</option>
+              <option value="Business ideas">Business ideas</option>
+              <option value="Stories and anecdotes">Stories and anecdotes</option>
+              <option value="Quotes">Quotes</option>
+              <option value="Products">Products</option>
+            </select>
+            <label for="limit">Limit</label>
+            <input type="number" id="limit" name="limit" value="20" min="1" max="100" style="width:4rem; padding:0.5rem; border:1px solid var(--vault-border); border-radius:6px;">
+          </div>
+        </form>
+      </section>
+
+      <div id="vault-results">
+        <p class="vault-empty">Enter your token and run a search to see results.</p>
+      </div>
+    </main>
+
+    <footer class="vault-footer">
+      Private vault · Search powered by Postgres FTS · <a href="https://superb-smile-production.up.railway.app" target="_blank" rel="noopener">API</a> · <a href="https://superb-smile-production.up.railway.app/docs" target="_blank" rel="noopener">Docs</a>
+    </footer>
+  </div>
+  <script>
+    window.VaultConfig = { apiBase: "https://superb-smile-production.up.railway.app" };
+  </script>
+  <script src="/js/vault.js"></script>
+</body>
+</html>

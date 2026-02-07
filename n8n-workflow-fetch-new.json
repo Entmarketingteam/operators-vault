@@ -6,15 +6,14 @@
         "rule": {
           "interval": [
             {
-              "field": "hours",
-              "hoursInterval": 6,
-              "triggerAtMinute": 0
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
             }
           ]
         }
       },
       "id": "b2c3d4e5-0001-4000-8000-000000000001",
-      "name": "Every 6 hours",
+      "name": "Daily 06:00 UTC",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [0, 0],
@@ -35,7 +34,7 @@
     }
   ],
   "connections": {
-    "Every 6 hours": {
+    "Daily 06:00 UTC": {
       "main": [[{ "node": "POST /sync", "type": "main", "index": 0 }]]
     }
   },

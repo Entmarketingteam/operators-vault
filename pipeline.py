@@ -263,8 +263,8 @@ def _process_one(
             st, et = u.get("start"), u.get("end")
             if st is not None and et is not None:
                 cur.execute(
-                    "INSERT INTO segments (transcription_id, start_time_sec, end_time_sec, text, speaker_label) VALUES (%s,%s,%s,%s,%s)",
-                    (trans_id, float(st), float(et), (u.get("transcript") or ""), str(u.get("speaker") or "")),
+                    "INSERT INTO segments (transcription_id, start_time_sec, end_time_sec, text, speaker_label, video_id, podcast) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                    (trans_id, float(st), float(et), (u.get("transcript") or ""), str(u.get("speaker") or ""), video_id, podcast),
                 )
         conn.commit()
 
@@ -278,25 +278,7 @@ def _process_one(
             it["_chunk"] = ch
             all_insights.append(it)
 
-    # 6) For each: title, timestamps, framework (if Frameworks and exercises); insert; Meilisearch
-    ms_host = os.environ.get("MEILISEARCH_HOST")
-    ms_key = os.environ.get("MEILISEARCH_API_KEY")
-    ms_client = None
-    if ms_host and ms_key:
-        try:
-            from meilisearch import Client as MeiliClient
-
-            ms_client = MeiliClient(ms_host, ms_key)
-            idx = ms_client.index("operators_insights")
-            try:
-                idx.update_filterable_attributes(["podcast", "category", "video_id"])
-                idx.update_searchable_attributes(["title", "description", "framework_markdown"])
-                idx.update_sortable_attributes(["start_time_sec", "title", "category"])
-            except Exception:
-                pass
-        except Exception:
-            ms_client = None
-
+    # 6) For each: title, timestamps, framework; insert into Postgres (FTS indexes auto-update)
     if db_url:
         import psycopg2
 
@@ -331,22 +313,6 @@ def _process_one(
                 """,
                 (ins_id, video_id, podcast, cat, title, desc, start_sec, end_sec, fw or None, (it.get("_chunk") or "")[:8000]),
             )
-        if ms_client:
-            doc = {
-                "id": ins_id,
-                "video_id": video_id,
-                "podcast": podcast,
-                "category": cat,
-                "title": title,
-                "description": desc,
-                "start_time_sec": start_sec,
-                "end_time_sec": end_sec,
-                "framework_markdown": fw or None,
-            }
-            try:
-                ms_client.index("operators_insights").add_documents([doc])
-            except Exception:
-                pass
 
     if conn:
         conn.commit()

@@ -18,16 +18,16 @@ Or:
 
 ## 1. What This Project Is
 
-Podcast intelligence for **9 Operators**, **Marketing Operator**, **Finance Operator**: YouTube → audio → Deepgram transcription → LLM insight extraction (Anthropic) → Supabase + Meilisearch. CSVs seed initial videos; `--fetch-new` pulls new episodes from YouTube channels; `--process-new` runs the pipeline on unprocessed videos.
+Podcast intelligence for **9 Operators**, **Marketing Operator**, **Finance Operator**: YouTube → audio → Deepgram transcription → LLM insight extraction (Anthropic) → Supabase. Search is Postgres FTS (private; Supabase Auth). CSVs or `--fetch-new` (YouTube API) seed videos; `--process-new` runs the pipeline on unprocessed videos.
 
 ---
 
 ## 2. Where We Are (Current State)
 
-- **Implemented and committed:** Schema, pipeline (seed, process, fetch-new, process-new), API (process, fetch-new, process-new, sync, sync/async, process-new/async, jobs, health, search, search-ui), youtube_client (CSVs + YouTube Data API), prompts, run_schema, run_all, n8n workflows, install_wheels workaround. `/search` supports `?sort=`. `meilisearch-setup.md` has Railway fix for `invalid_api_key`.
-- **Railway:** https://superb-smile-production.up.railway.app — `DATABASE_URL` = Supabase **Session pooler** (aws-0-us-west-2). `/health` all ok; `POST /sync` works; **Operators Vault – Sync New Episodes** in n8n is updated and **Active** (every 6h). `GET /search` can return `invalid_api_key` if `MEILISEARCH_API_KEY` on Railway is wrong or lacks search rights—fix in Meilisearch/Railway if needed.
-- **Optional:** Store links in Supabase: `POST /seed-links/csv` or `pipeline.py --seed-csvs-to-db`. Then `POST /backfill` (no body) or `--seed-from-db --process-all` runs from `seed_links` (no CSV upload needed).
-- **Hosting (like mfmvault.com):** App is on Railway at `superb-smile-production.up.railway.app`. To serve it at a custom domain (e.g. operatorsvault.com): add the domain in Railway, point DNS (CNAME) at Railway, fix `MEILISEARCH_API_KEY` so `/search-ui` works. Full steps: **`HOSTING.md`**.
+- **Implemented and committed:** Schema, **Postgres FTS migration** (insights + moments search), pipeline (no Meilisearch), API with **private search** (JWT auth), youtube_client (channels: @Operators9, @MarketingOperators, @FinanceOperatorsFOPS), run_schema, run_migrate_postgres_search, run_all, n8n workflows.
+- **Railway:** https://superb-smile-production.up.railway.app — `DATABASE_URL` = Supabase Session pooler. `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set; Meilisearch vars removed. Set `SUPABASE_JWT_SECRET` for `/search` (run `python scripts/set_railway_supabase_auth.py` after adding JWT secret to `.env` from Supabase → Settings → API → JWT secret). n8n **Operators Vault – Sync New Episodes** recommended **daily**.
+- **Optional:** Store links in Supabase: `POST /seed-links/csv` or `pipeline.py --seed-csvs-to-db`; then `POST /backfill` or `--seed-from-db --process-all`.
+- **Hosting:** See **`HOSTING.md`** for custom domain. Search is Postgres; no Meilisearch.
 
 ---
 
@@ -44,15 +44,15 @@ Podcast intelligence for **9 Operators**, **Marketing Operator**, **Finance Oper
   - `api.py` – FastAPI app
   - `pipeline.py` – CLI: --seed-csvs, --seed-csvs-to-db, --seed-from-db, --process, --fetch-new, --process-new
   - `youtube_client.py` – CSVs + resolve_channel_id, fetch_channel_videos
-  - `sql/schema.sql` – includes `seed_links` (store CSV links in Supabase; backfill reads from here)
-  - `scripts/run_schema.py` – Apply `sql/schema.sql`
+  - `sql/schema.sql` – base schema; `sql/migrate_postgres_search.sql` – FTS + search functions
+  - `scripts/run_schema.py` – Apply schema; `scripts/run_migrate_postgres_search.py` – apply search migration
   - `scripts/run_all.py` – schema + fetch-new + process-new (optional --seed-csvs)
 
 ---
 
 ## 4. Environment and Secrets
 
-- **`.env`** in project root (gitignored). Contains: `DATABASE_URL`, `YOUTUBE_API_KEY`, `DEEPGRAM_API_KEY`, `ANTHROPIC_API_KEY`, `MEILISEARCH_HOST`, `MEILISEARCH_API_KEY`, `N8N_HOST`, `N8N_API_KEY`, `DATABASE_URL` (Supabase Postgres), etc.
+- **`.env`** in project root (gitignored). Contains: `DATABASE_URL`, `YOUTUBE_API_KEY`, `DEEPGRAM_API_KEY`, `ANTHROPIC_API_KEY`, `SUPABASE_JWT_SECRET` (for private search), `N8N_HOST`, `N8N_API_KEY`, etc.
 - **Deps:** `pip install -r requirements.txt`. If pip hits HTTP/2 errors: `.\scripts\install_wheels.ps1` then `pip install -r requirements.txt`. `yt-dlp` must be on PATH or from the yt-dlp Python package.
 
 ---
@@ -65,8 +65,9 @@ cd C:\Users\ethan.atchley\operators-vault
 .\scripts\install_wheels.ps1
 pip install -r requirements.txt
 
-# Schema
+# Schema + Postgres search migration
 python scripts/run_schema.py
+python scripts/run_migrate_postgres_search.py
 
 # One-command sync (fetch from YouTube + process new)
 python scripts/run_all.py
@@ -76,7 +77,7 @@ python scripts/run_all.py --seed-csvs
 
 # API
 python -m uvicorn api:app --host 0.0.0.0 --port 8000
-# Then: GET /health, GET /search?q=..., POST /sync, POST /process, etc.
+# Then: GET /health, POST /sync, POST /process. GET /search requires Authorization: Bearer <supabase_access_token>.
 ```
 
 ---
@@ -84,8 +85,8 @@ python -m uvicorn api:app --host 0.0.0.0 --port 8000
 ## 6. Instructions for a New Agent (Cursor / Full-Context Window)
 
 1. **Open:** `C:\Users\ethan.atchley\operators-vault` and read, in order: `HANDOFF.md`, `PLAN.md`, `PROGRESS.md`.
-2. **Context:** The pipeline is built. Pending: run `run_schema`, then `run_all` or `--seed-csvs --process-all` when DB and Meilisearch are reachable. `YOUTUBE_API_KEY` is set in `.env`.
-3. **If the user says “keep building”:** Prefer (a) running and validating the existing flow (schema, run_all, /health, /search), (b) fixing Finance Operators channel handle if wrong (`YOUTUBE_CHANNEL_FINANCE_OPERATORS`), (c) extending API or pipeline per `PLAN.md` “Next steps”.
+2. **Context:** The pipeline is built. Run `run_schema`, then `run_migrate_postgres_search`, then `run_all` or `--seed-csvs --process-all`. Search is private (Supabase JWT). `YOUTUBE_API_KEY` is set in `.env`.
+3. **If the user says “keep building”:** Validate schema + migration, run_all, /health, /search (with Bearer token) (`YOUTUBE_CHANNEL_FINANCE_OPERATORS`), (c) extending API or pipeline per `PLAN.md` “Next steps”.
 4. **If the user reports errors:** Use `GET /health` and `scripts/run_schema.py` / `pipeline.py --fetch-new` for diagnosis. Check `.env` and that `yt-dlp` is available for `audio_extractor`.
 
 ---
@@ -103,7 +104,7 @@ python -m uvicorn api:app --host 0.0.0.0 --port 8000
 ## 8. n8n
 
 - `n8n-workflow.json` – One-off: Manual/Webhook → Set (video_id, podcast) → `POST /process`.
-- `n8n-workflow-fetch-new.json` – Cron every 6h → `POST /sync`.
+- `n8n-workflow-fetch-new.json` – Cron (recommended **daily**) → `POST /sync`.
 - **`scripts/setup_n8n_workflows.py`** – Imports or updates both workflows with `RAILWAY_APP_URL`; idempotent. Requires `N8N_HOST`, `N8N_API_KEY`. Run: `python scripts/setup_n8n_workflows.py`. **Operators Vault – Sync New Episodes** uses `rule.interval` (Schedule Trigger 1.2) so API activate works; Process is manual-only.
 
 ---
@@ -111,5 +112,16 @@ python -m uvicorn api:app --host 0.0.0.0 --port 8000
 ## 9. Railway
 
 - **App:** https://superb-smile-production.up.railway.app  
-- **DB:** `DATABASE_URL` = Supabase **Session pooler** (e.g. `aws-0-us-west-2.pooler.supabase.com:5432`). Get from Supabase: **Project Settings → Database → Connection string → Pooler settings → Session**.  
-- **Meilisearch:** If `GET /search` returns `invalid_api_key`, set `MEILISEARCH_API_KEY` in Railway to a key with **search** (and index) on `operators_insights`. From project root, with `RAILWAY_API_TOKEN` and Meilisearch keys in `.env`: `python scripts/set_railway_meilisearch.py` (uses Railway GraphQL API).
+- **DB:** `DATABASE_URL` = Supabase **Session pooler**.  
+- **Search:** Postgres FTS (no Meilisearch). `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set; Meilisearch vars have been removed.
+- **One-time:** Add `SUPABASE_JWT_SECRET` so `/search` and search-ui accept Bearer tokens: copy from Supabase → Settings → API → JWT secret into `.env`, then run `python scripts/set_railway_supabase_auth.py` (or set the variable in Railway dashboard).
+
+**Remaining manual step (Auth):** Enable sign-in so `/search-ui` works.
+- **Option A (quick):** In [Supabase → Auth → Providers](https://supabase.com/dashboard/project/wbdwnlzbgugewtmvahwg/auth/providers), enable **Email**. For Google: enable **Google** and add OAuth client ID/secret; redirect URI `https://wbdwnlzbgugewtmvahwg.supabase.co/auth/v1/callback`.
+- **Option B (script):** Add a [Personal Access Token](https://supabase.com/dashboard/account/tokens) to `.env` as `SUPABASE_MANAGEMENT_TOKEN`. `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` are already in `.env`. Run `python scripts/enable_supabase_auth.py` to push them into Supabase and enable Email + Google sign-in.
+
+---
+
+## 10. Doppler
+
+- **Sync Google OAuth to Doppler:** After `doppler login` and `doppler setup` in the repo root, run `python scripts/sync_google_oauth_to_doppler.py` to push `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` from `.env` into your Doppler config.

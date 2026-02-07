@@ -19,5 +19,5 @@ yt-dlp>=2024.1.0
 # Transcription
 deepgram-sdk>=3.0.0
 
-# Search
-meilisearch>=0.31.0
+# Auth (Supabase JWT for private search)
+PyJWT>=2.8.0

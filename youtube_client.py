@@ -15,7 +15,7 @@ from typing import Any
 DEFAULT_CHANNEL_HANDLES = {
     "9operators": "Operators9",
     "marketing_operator": "MarketingOperators",
-    "finance_operators": "FinanceOperators",
+    "finance_operators": "FinanceOperatorsFOPS",
 }
 
 # CSV seed paths (Windows); override via env or pass to functions
