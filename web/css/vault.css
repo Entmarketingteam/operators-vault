@@ -101,6 +101,35 @@ body {
   max-width: 200px;
 }
 
+#vault-sign-in {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.vault-auth-or {
+  font-size: 0.85rem;
+  color: var(--vault-text-muted);
+}
+
+#vault-signed-in {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.vault-signed-in-email {
+  font-size: 0.9rem;
+  color: var(--vault-text-muted);
+}
+
+.vault-btn-sm {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+}
+
 /* Hero search */
 .vault-hero {
   margin-bottom: 1.5rem;

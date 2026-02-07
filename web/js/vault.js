@@ -6,6 +6,10 @@
   const STORAGE_KEY = 'vault_token';
 
   function getToken() {
+    if (window.VaultAuth && typeof window.VaultAuth.getToken === 'function') {
+      var t = window.VaultAuth.getToken();
+      if (t) return t;
+    }
     return document.getElementById('token')?.value?.trim() || sessionStorage.getItem(STORAGE_KEY) || '';
   }
 
@@ -123,7 +127,7 @@
     const token = getToken();
     if (token) setToken(token);
     if (!token) {
-      showError(out, 'Sign in and enter your access token above, or paste a Supabase access token to search.');
+      showError(out, 'Sign in above (Google or magic link) or paste a Supabase access token to search.');
       return;
     }
 

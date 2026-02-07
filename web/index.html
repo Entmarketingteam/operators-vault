@@ -14,12 +14,18 @@
     <header class="vault-header">
       <div class="vault-header-inner">
         <a href="/" class="vault-logo">Operators <span>Vault</span></a>
-        <div class="vault-auth">
-          <div class="token-wrap">
-            <input type="password" id="token" placeholder="Paste Supabase access token" title="From Supabase Auth after sign-in" autocomplete="off">
+        <div class="vault-auth" id="vault-auth-state">
+          <div id="vault-sign-in">
+            <button type="button" class="vault-btn vault-btn-primary" onclick="window.VaultAuth && window.VaultAuth.signInWithGoogle()">Sign in with Google</button>
+            <span class="vault-auth-or">or</span>
+            <input type="email" id="vault-magic-email" placeholder="Email for magic link" style="width:180px; padding:0.5rem 0.75rem; border:1px solid var(--vault-border); border-radius:6px;">
+            <button type="button" class="vault-btn vault-btn-secondary" onclick="var e=document.getElementById('vault-magic-email'); window.VaultAuth && window.VaultAuth.signInWithMagicLink(e && e.value).then(function(){ alert('Check your email for the sign-in link.'); }).catch(function(err){ alert(err.message || 'Failed'); });">Send magic link</button>
+          </div>
+          <div id="vault-signed-in" style="display:none;"><span class="vault-signed-in-email" id="vault-signed-in-email"></span> <button type="button" class="vault-btn vault-btn-secondary vault-btn-sm" onclick="window.VaultAuth && window.VaultAuth.signOut()">Sign out</button> <button type="button" class="vault-btn vault-btn-primary" onclick="document.getElementById('vault-search-form').requestSubmit()">Search</button></div>
+          <div class="token-wrap" id="vault-token-wrap" style="display:none;">
+            <input type="password" id="token" placeholder="Paste token (advanced)" title="Supabase access token" autocomplete="off" style="width:180px;">
             <button type="button" class="vault-btn vault-btn-primary" onclick="document.getElementById('vault-search-form').requestSubmit()">Search</button>
           </div>
-          <span class="sign-in-hint">Sign in at Supabase (email or Google), then paste token here.</span>
         </div>
       </div>
     </header>
@@ -64,7 +70,7 @@
       </section>
 
       <div id="vault-results">
-        <p class="vault-empty">Enter your token and run a search to see results.</p>
+        <p class="vault-empty">Sign in above, then run a search.</p>
       </div>
     </main>
 
@@ -73,8 +79,17 @@
     </footer>
   </div>
   <script>
-    window.VaultConfig = { apiBase: "https://superb-smile-production.up.railway.app" };
+    window.VaultConfig = {
+      apiBase: "https://superb-smile-production.up.railway.app",
+      supabaseUrl: "https://wbdwnlzbgugewtmvahwg.supabase.co",
+      supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndiZHdubHpiZ3VnZXd0bXZhaHdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg5Mzc0MzIsImV4cCI6MjA4NDUxMzQzMn0.8cW9UoDzsCzv8_JHU0imeY8NpOdF5e2XAE_Gxq6O_cs"
+    };
   </script>
+  <script type="module">
+    import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+    window.createSupabaseClient = function (url, key) { return Promise.resolve(createClient(url, key)); };
+  </script>
+  <script src="/js/auth.js"></script>
   <script src="/js/vault.js"></script>
 </body>
 </html>

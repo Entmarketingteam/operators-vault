@@ -8,7 +8,13 @@ The search UI is a static site in `web/` that calls the Railway API.
 
 1. **Connect the repo** at [vercel.com](https://vercel.com) → Import this repository.
 2. **Root directory:** **Settings → General → Root Directory** → set to `web` → Save.
-3. Deploy (no build command or output dir needed). Your site: `https://<your-project>.vercel.app`.
+3. **Supabase sign-in (no more pasting tokens):**
+   - In Vercel: **Settings → Environment Variables** add:
+     - **Name:** `SUPABASE_ANON_KEY`  
+     - **Value:** your Supabase **anon public** key (Supabase → Project → **Settings → API** → Project API keys → **anon public**).
+   - **Settings → Build and Deployment → Build Command** set to: `node inject-env.js`  
+   - Redeploy. Users can then **Sign in with Google** or **Send magic link** on the site; no token paste needed.
+4. Your site is at `https://<your-project>.vercel.app`.
 
 ---
 
@@ -33,5 +39,7 @@ The search UI is a static site in `web/` that calls the Railway API.
 4. After DNS propagates, add that domain to Railway `CORS_ORIGINS` as well (comma-separated).
 
 ---
+
+**Supabase redirect:** In Supabase → **Authentication → URL Configuration**, set **Site URL** to your Vercel URL (e.g. `https://operators-vault.vercel.app`) and add the same URL under **Redirect URLs** so Google and magic-link sign-in work.
 
 **API URL:** The front end uses `https://superb-smile-production.up.railway.app`. To change it, edit `window.VaultConfig.apiBase` in `web/index.html`.
