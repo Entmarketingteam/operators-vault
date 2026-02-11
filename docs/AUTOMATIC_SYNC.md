@@ -2,7 +2,9 @@
 
 Set up automatic sync so new YouTube videos are fetched and processed as soon as they're posted.
 
-## Option 1: Railway Cron Job (Recommended)
+**👉 RECOMMENDED: Railway Cron Job** (see `RAILWAY_CRON_SETUP.md` for step-by-step guide)
+
+## Option 1: Railway Cron Job (Recommended - Easiest)
 
 Railway supports cron jobs natively. Set one up:
 
