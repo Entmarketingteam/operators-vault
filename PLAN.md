@@ -19,14 +19,14 @@
 
 | Area | What |
 |------|------|
-| Schema | `videos`, `transcriptions`, `segments`, `insights`, `people`, `video_people`; `channel_id`, `published_at` on videos |
-| run_schema | Applies `sql/schema.sql`; splits by `;`; .env fallback |
-| youtube_client | load_from_csv, load_all_seed_csvs, resolve_channel_id, fetch_channel_videos (published_at), get_channel_handle; DEFAULT_CHANNEL_HANDLES; YOUTUBE_CHANNEL_* override |
-| pipeline | --seed-csvs, --seed-csvs --process-all, --process, --fetch-new, --process-new; _ensure_video(channel_id, published_at); _fetch_new, _get_unprocessed |
-| api | POST /process, /fetch-new, /process-new, /sync, /sync/async, /process-new/async; GET /jobs/{id}, /health, /search, /search-ui, / |
-| Prompts | extract_insights_system, make_framework_content, timestamp_extraction, title_generation (operators) |
-| n8n | n8n-workflow.json (process one), n8n-workflow-fetch-new.json (cron → /sync) |
-| Scripts | run_schema, run_all (schema + fetch-new + process-new; --seed-csvs, --schema-only), import_n8n_workflow, install_wheels |
+| Schema | `videos`, `transcriptions`, `segments`, `insights`, `people`, `video_people`; Phase 1: `view_count`, `like_count`, `thumbnail_url`, etc.; `titans` podcast |
+| run_schema | Applies `sql/schema.sql`; run_migrate_phase1 (YouTube stats + TITANS) |
+| youtube_client | load_from_csv (incl. operators_and_titans, infer_podcast_from_title), fetch_channel_videos, fetch_playlist_videos (TITANS), DEFAULT_CSV_PATHS |
+| pipeline | --seed-csvs, --seed-csvs-to-db, --seed-from-db, --fetch-new (incl. TITANS playlist), --process-new; titans in CLI |
+| api | POST /process, /fetch-new, /process-new, /sync, /sync/async, /backfill, /seed-links/csv (incl. operators_and_titans); GET /search, /search-ui, /episodes, /episodes-ui, /people, /config, /health, /stats |
+| UI | Search (Discover), Episodes catalog (Catalog) with nav; TITANS in filters; title strip for TITANS display |
+| Doppler | docs/DOPPLER.md; run_with_doppler.py; enable_supabase_auth accepts SUPABASE_API_KEY2 |
+| Scripts | run_all (--csv-only, --migration-only), run_migrate_phase1, run_with_doppler (migrate, run_all) |
 
 ---
 

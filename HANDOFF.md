@@ -24,9 +24,9 @@ Podcast intelligence for **9 Operators**, **Marketing Operator**, **Finance Oper
 
 ## 2. Where We Are (Current State)
 
-- **Implemented and committed:** Schema, **Postgres FTS migration** (insights + moments search), pipeline (no Meilisearch), API with **private search** (JWT auth), youtube_client (channels: @Operators9, @MarketingOperators, @FinanceOperatorsFOPS), run_schema, run_migrate_postgres_search, run_all, n8n workflows.
-- **Railway:** https://superb-smile-production.up.railway.app — `DATABASE_URL` = Supabase Session pooler. `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set; Meilisearch vars removed. Set `SUPABASE_JWT_SECRET` for `/search` (run `python scripts/set_railway_supabase_auth.py` after adding JWT secret to `.env` from Supabase → Settings → API → JWT secret). n8n **Operators Vault – Sync New Episodes** recommended **daily**.
-- **Optional:** Store links in Supabase: `POST /seed-links/csv` or `pipeline.py --seed-csvs-to-db`; then `POST /backfill` or `--seed-from-db --process-all`.
+- **Implemented and committed:** Schema, Phase 1 migration (YouTube stats + TITANS), Postgres FTS, pipeline (seed/fetch/process, titans, operators_and_titans CSV), API: search, **episodes**, **insights**, **people**, **POST /chat**, seed-links/csv, backfill; UIs: **/search-ui**, **/episodes-ui**, **/insights-ui**, **/people-ui**, **/ask-ui**; Doppler docs and run_with_doppler; web/ front end with nav to Railway UIs.
+- **Railway:** https://superb-smile-production.up.railway.app — API + all UIs. Set `SUPABASE_JWT_SECRET`, `DATABASE_URL`, etc. (see `docs/DEPLOYMENT_ENV.md`). n8n **Operators Vault – Sync New Episodes** recommended **daily**.
+- **Vercel:** Static `web/` (root dir `web`); nav links to Railway for Discover, Listen, Catalog, People, Ask. Push to GitHub deploys both Railway and Vercel when repo is connected.
 - **Hosting:** See **`HOSTING.md`** for custom domain. Search is Postgres; no Meilisearch.
 
 ---

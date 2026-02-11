@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Operators Vault – Episodes</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ static_prefix }}/css/vault.css">
+</head>
+<body>
+  <div class="vault-app">
+    <header class="vault-header">
+      <div class="vault-header-inner">
+        <a href="/search-ui" class="vault-logo">Operators <span>Vault</span></a>
+        <nav class="vault-nav" style="display:flex; gap:1rem; align-items:center;">
+          <a href="/search-ui" style="color:inherit; text-decoration:none;">Discover</a>
+          <a href="/insights-ui" style="color:inherit; text-decoration:none;">Listen</a>
+          <a href="/episodes-ui" style="color:inherit; text-decoration:none; font-weight:500;">Catalog</a>
+          <a href="/people-ui" style="color:inherit; text-decoration:none;">People</a>
+          <a href="/ask-ui" style="color:inherit; text-decoration:none;">Ask</a>
+          <a href="/docs" target="_blank" rel="noopener" style="color:inherit; text-decoration:none;">API</a>
+        </nav>
+        <div class="vault-auth">
+          <div class="token-wrap">
+            <input type="password" id="token" placeholder="Paste Supabase access token" autocomplete="off">
+            <button type="button" class="vault-btn vault-btn-primary" onclick="window.VaultEpisodes && window.VaultEpisodes.load()">Load episodes</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="vault-hero">
+        <h1>Episodes</h1>
+        <p class="subtitle">Browse by show. Use the same token as Search.</p>
+        <div class="vault-filters" style="margin-bottom:1rem;">
+          <label for="episodes-podcast">Show</label>
+          <select id="episodes-podcast">
+            <option value="">All</option>
+            <option value="9operators">9 Operators</option>
+            <option value="marketing_operator">Marketing Operator</option>
+            <option value="finance_operators">Finance Operators</option>
+            <option value="titans">TITANS</option>
+          </select>
+          <button type="button" class="vault-btn vault-btn-secondary" onclick="window.VaultEpisodes && window.VaultEpisodes.load()">Apply</button>
+        </div>
+      </section>
+
+      <div id="vault-episodes">
+        <p class="vault-empty">Paste your token and click Load episodes.</p>
+      </div>
+    </main>
+
+    <footer class="vault-footer">
+      Private vault · <a href="/search-ui">Search</a> · <a href="/">API</a> · <a href="/docs">Docs</a>
+    </footer>
+  </div>
+  <script>
+    window.VaultConfig = { apiBase: "{{ api_base }}", supabaseUrl: "{{ supabase_url }}", supabaseAnonKey: "{{ supabase_anon_key }}" };
+  </script>
+  <script src="{{ static_prefix }}/js/episodes.js"></script>
+</body>
+</html>

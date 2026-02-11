@@ -69,20 +69,41 @@ def _ensure_video(
     duration_seconds: int | None = None,
     channel_id: str | None = None,
     published_at: str | None = None,
+    *,
+    view_count: int | None = None,
+    like_count: int | None = None,
+    comment_count: int | None = None,
+    thumbnail_url: str | None = None,
+    description: str | None = None,
+    channel_title: str | None = None,
+    tags: str | None = None,
 ) -> None:
     cursor.execute(
         """
-        INSERT INTO videos (video_id, podcast, title, duration_seconds, channel_id, published_at)
-        VALUES (%s, %s, %s, %s, %s, %s::timestamptz)
+        INSERT INTO videos (
+            video_id, podcast, title, duration_seconds, channel_id, published_at,
+            view_count, like_count, comment_count, thumbnail_url, description, channel_title, tags
+        )
+        VALUES (%s, %s, %s, %s, %s, %s::timestamptz, %s, %s, %s, %s, %s, %s, %s)
         ON CONFLICT (video_id) DO UPDATE SET
           podcast = EXCLUDED.podcast,
           title = COALESCE(NULLIF(EXCLUDED.title,''), videos.title),
           duration_seconds = COALESCE(EXCLUDED.duration_seconds, videos.duration_seconds),
           channel_id = COALESCE(EXCLUDED.channel_id, videos.channel_id),
           published_at = COALESCE(EXCLUDED.published_at, videos.published_at),
+          view_count = COALESCE(EXCLUDED.view_count, videos.view_count),
+          like_count = COALESCE(EXCLUDED.like_count, videos.like_count),
+          comment_count = COALESCE(EXCLUDED.comment_count, videos.comment_count),
+          thumbnail_url = COALESCE(EXCLUDED.thumbnail_url, videos.thumbnail_url),
+          description = COALESCE(EXCLUDED.description, videos.description),
+          channel_title = COALESCE(EXCLUDED.channel_title, videos.channel_title),
+          tags = COALESCE(EXCLUDED.tags, videos.tags),
           updated_at = now()
         """,
-        (video_id, podcast, title or "", duration_seconds, channel_id, published_at),
+        (
+            video_id, podcast, title or "", duration_seconds, channel_id, published_at,
+            view_count, like_count, comment_count, thumbnail_url, description, channel_title, tags,
+        ),
     )
 
 
@@ -151,9 +172,39 @@ def _seed_csvs_to_db(cursor, paths_override: dict[str, str] | None = None) -> in
     return upsert_seed_links(cursor, rows)
 
 
+def _ensure_video_from_record(cursor, v: dict, min_duration_sec: int = 300) -> bool:
+    """Upsert one video from a fetch record (channel or playlist). Returns True if upserted."""
+    dur = v.get("duration_seconds")
+    if dur is not None and dur < min_duration_sec:
+        return False
+    _ensure_video(
+        cursor,
+        v["video_id"],
+        v["podcast"],
+        v.get("title") or "",
+        dur,
+        channel_id=v.get("channel_id"),
+        published_at=v.get("published_at"),
+        view_count=v.get("view_count"),
+        like_count=v.get("like_count"),
+        comment_count=v.get("comment_count"),
+        thumbnail_url=v.get("thumbnail_url"),
+        description=v.get("description"),
+        channel_title=v.get("channel_title"),
+        tags=v.get("tags"),
+    )
+    return True
+
+
 def _fetch_new(cursor, *, max_per_channel: int = 50, min_duration_sec: int = 300) -> int:
-    """Fetch recent videos from YouTube channels (Operators9, MarketingOperators, FinanceOperators) and upsert into videos. Requires YOUTUBE_API_KEY."""
-    from youtube_client import fetch_channel_videos, get_channel_handle, resolve_channel_id
+    """Fetch recent videos from YouTube (channels + TITANS playlist) and upsert into videos. Requires YOUTUBE_API_KEY."""
+    from youtube_client import (
+        fetch_channel_videos,
+        fetch_playlist_videos,
+        get_channel_handle,
+        get_playlist_id,
+        resolve_channel_id,
+    )
 
     total = 0
     for podcast in ("9operators", "marketing_operator", "finance_operators"):
@@ -167,21 +218,24 @@ def _fetch_new(cursor, *, max_per_channel: int = 50, min_duration_sec: int = 300
         videos = fetch_channel_videos(cid, podcast=podcast, max_results=max_per_channel)
         n = 0
         for v in videos:
-            dur = v.get("duration_seconds")
-            if dur is not None and dur < min_duration_sec:
-                continue
-            _ensure_video(
-                cursor,
-                v["video_id"],
-                v["podcast"],
-                v.get("title") or "",
-                dur,
-                channel_id=v.get("channel_id"),
-                published_at=v.get("published_at"),
-            )
-            n += 1
-            total += 1
+            if _ensure_video_from_record(cursor, v, min_duration_sec):
+                n += 1
+                total += 1
         print(f"  [fetch-new] {podcast}: {n} upserted (from {len(videos)} fetched)", flush=True)
+
+    # TITANS: fetch by playlist when YOUTUBE_PLAYLIST_TITANS is set
+    playlist_id = get_playlist_id("titans")
+    if playlist_id:
+        videos = fetch_playlist_videos(playlist_id, podcast="titans", max_results=max_per_channel)
+        n = 0
+        for v in videos:
+            if _ensure_video_from_record(cursor, v, min_duration_sec):
+                n += 1
+                total += 1
+        print(f"  [fetch-new] titans: {n} upserted (from {len(videos)} fetched)", flush=True)
+    else:
+        print("  [fetch-new] titans: no YOUTUBE_PLAYLIST_TITANS set, skipping", flush=True)
+
     return total
 
 
@@ -231,9 +285,9 @@ def _process_one(
 
     # 2) Audio
     print(f"  [audio] {video_id}", flush=True)
-    path = download_audio(video_id, work_dir)
+    path, err = download_audio(video_id, work_dir)
     if not path:
-        print("  [audio] download failed", flush=True)
+        print(f"  [audio] download failed: {err}", flush=True)
         return False
 
     # 3) Transcribe
@@ -378,7 +432,7 @@ def main() -> int:
     ap.add_argument("--seed-from-db", action="store_true", help="Upsert from seed_links into videos; use with --process-new to run backfill from DB")
     ap.add_argument("--process-all", action="store_true", help="After --seed-csvs or --seed-from-db, process unprocessed videos (audio->transcribe->extract->store)")
     ap.add_argument("--process", metavar="VIDEO_ID", help="Process one video: download audio, transcribe, extract insights, store")
-    ap.add_argument("--podcast", default="9operators", choices=("9operators", "marketing_operator", "finance_operators"), help="For --process when video not in DB")
+    ap.add_argument("--podcast", default="9operators", choices=("9operators", "marketing_operator", "finance_operators", "titans"), help="For --process when video not in DB")
     ap.add_argument("--fetch-new", action="store_true", help="Fetch new videos from YouTube channels (9 Operators, Marketing, Finance) and upsert into videos. Requires YOUTUBE_API_KEY.")
     ap.add_argument("--process-new", action="store_true", help="Process videos that have no transcription yet (audio->transcribe->extract->store)")
     ap.add_argument("--work-dir", default=None, help="Temp dir for audio (default: TEMP)")

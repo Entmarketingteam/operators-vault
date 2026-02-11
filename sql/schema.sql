@@ -2,15 +2,22 @@
 -- Supabase/Postgres schema: videos, transcriptions, segments, insights, people
 -- Supports podcast/source_channel for filtering (9operators, marketing_operator, finance_operators).
 
--- Videos: one row per YouTube episode
+-- Videos: one row per YouTube episode (YouTube stats from Phase 1 migration or fetch)
 CREATE TABLE IF NOT EXISTS videos (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   video_id TEXT UNIQUE NOT NULL,
   title TEXT,
   duration_seconds INT,
   channel_id TEXT,
-  podcast TEXT NOT NULL,  -- '9operators' | 'marketing_operator' | 'finance_operators'
+  podcast TEXT NOT NULL,  -- 9operators | marketing_operator | finance_operators | titans
   published_at TIMESTAMPTZ,
+  view_count BIGINT,
+  like_count BIGINT,
+  comment_count BIGINT,
+  thumbnail_url TEXT,
+  description TEXT,
+  channel_title TEXT,
+  tags TEXT,
   created_at TIMESTAMPTZ DEFAULT now(),
   updated_at TIMESTAMPTZ DEFAULT now()
 );

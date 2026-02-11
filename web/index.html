@@ -13,7 +13,15 @@
   <div class="vault-app">
     <header class="vault-header">
       <div class="vault-header-inner">
-        <a href="/" class="vault-logo">Operators <span>Vault</span></a>
+        <a href="/" class="vault-logo" id="vault-logo">Operators <span>Vault</span></a>
+        <nav class="vault-nav" style="display:flex; gap:1rem; align-items:center;" id="vault-nav">
+          <a href="/" style="color:inherit; text-decoration:none; font-weight:500;">Discover</a>
+          <a href="#" data-route="insights-ui" style="color:inherit; text-decoration:none;">Listen</a>
+          <a href="#" data-route="episodes-ui" style="color:inherit; text-decoration:none;">Catalog</a>
+          <a href="#" data-route="people-ui" style="color:inherit; text-decoration:none;">People</a>
+          <a href="#" data-route="ask-ui" style="color:inherit; text-decoration:none;">Ask</a>
+          <a href="#" data-route="docs" style="color:inherit; text-decoration:none;">API</a>
+        </nav>
         <div class="vault-auth" id="vault-auth-state">
           <div id="vault-sign-in">
             <button type="button" class="vault-btn vault-btn-primary" onclick="window.VaultAuth && window.VaultAuth.signInWithGoogle()">Sign in with Google</button>
@@ -33,7 +41,12 @@
     <main>
       <section class="vault-hero">
         <h1>Search Operators Vault</h1>
-        <p class="subtitle">Explore insights and moments from 9 Operators, Marketing Operator, and Finance Operator.</p>
+        <p class="subtitle">Explore insights and moments from 9 Operators, Marketing Operator, Finance Operator, and TITANS.</p>
+        <div class="vault-shortcuts" style="margin-bottom:0.75rem;">
+          <span style="margin-right:0.5rem;">Show:</span>
+          <button type="button" class="vault-btn vault-btn-secondary vault-btn-sm" onclick="document.getElementById('podcast').value=''; document.getElementById('vault-search-form').requestSubmit();">All</button>
+          <button type="button" class="vault-btn vault-btn-secondary vault-btn-sm" onclick="document.getElementById('podcast').value='titans'; document.getElementById('vault-search-form').requestSubmit();">TITANS</button>
+        </div>
         <form id="vault-search-form" onsubmit="event.preventDefault(); window.VaultSearch();">
           <div class="vault-search-bar">
             <input type="search" name="q" placeholder="Try 'pricing' or 'framework'…" autofocus aria-label="Search">
@@ -46,6 +59,7 @@
               <option value="9operators">9 Operators</option>
               <option value="marketing_operator">Marketing Operator</option>
               <option value="finance_operators">Finance Operators</option>
+              <option value="titans">TITANS</option>
             </select>
             <label for="type_">Type</label>
             <select id="type_" name="type_">
@@ -75,7 +89,7 @@
     </main>
 
     <footer class="vault-footer">
-      Private vault · Search powered by Postgres FTS · <a href="https://superb-smile-production.up.railway.app" target="_blank" rel="noopener">API</a> · <a href="https://superb-smile-production.up.railway.app/docs" target="_blank" rel="noopener">Docs</a>
+      Private vault · <a href="#" data-route="search-ui">Search</a> · <a href="#" data-route="episodes-ui">Episodes</a> · <a href="#" data-route="insights-ui">Listen</a> · <a href="#" data-route="ask-ui">Ask</a> · <a href="#" data-route="docs" target="_blank" rel="noopener">API</a>
     </footer>
   </div>
   <script>
@@ -84,6 +98,19 @@
       supabaseUrl: "https://wbdwnlzbgugewtmvahwg.supabase.co",
       supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndiZHdubHpiZ3VnZXd0bXZhaHdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg5Mzc0MzIsImV4cCI6MjA4NDUxMzQzMn0.8cW9UoDzsCzv8_JHU0imeY8NpOdF5e2XAE_Gxq6O_cs"
     };
+    (function () {
+      var base = window.VaultConfig && window.VaultConfig.apiBase ? window.VaultConfig.apiBase.replace(/\/$/, '') : '';
+      function applyNav() {
+        [].slice.call(document.querySelectorAll('[data-route]')).forEach(function (a) {
+          var r = a.getAttribute('data-route');
+          if (r === 'docs') a.href = base + '/docs'; else a.href = base + '/' + r;
+          if (r !== 'docs') a.removeAttribute('target');
+        });
+        var logo = document.getElementById('vault-logo');
+        if (logo) logo.href = base ? base + '/search-ui' : '/';
+      }
+      if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', applyNav); else applyNav();
+    })();
   </script>
   <script type="module">
     import { createClient } from "https://esm.sh/@supabase/supabase-js@2";

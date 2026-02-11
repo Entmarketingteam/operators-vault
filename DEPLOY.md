@@ -1,6 +1,6 @@
 # Deploy Operators Vault on Vercel
 
-The search UI is a static site in `web/` that calls the Railway API.
+The static front end in `web/` calls the Railway API. Nav links (Discover, Listen, Catalog, People, Ask, API) point to Railway-hosted pages (`/search-ui`, `/episodes-ui`, `/insights-ui`, `/people-ui`, `/ask-ui`, `/docs`). Pushing to GitHub updates both Railway (API + all UIs) and Vercel (this `web/` site) when the repo is connected to both.
 
 ---
 
@@ -42,4 +42,4 @@ The search UI is a static site in `web/` that calls the Railway API.
 
 **Supabase redirect:** In Supabase → **Authentication → URL Configuration**, set **Site URL** to your Vercel URL (e.g. `https://operators-vault.vercel.app`) and add the same URL under **Redirect URLs** so Google and magic-link sign-in work.
 
-**API URL:** The front end uses `https://superb-smile-production.up.railway.app`. To change it, edit `window.VaultConfig.apiBase` in `web/index.html`.
+**API URL:** The front end uses `window.VaultConfig.apiBase` in `web/index.html` (default `https://superb-smile-production.up.railway.app`). Nav links are built from this base so Listen, Catalog, People, and Ask open the Railway-hosted UIs. To use a different API URL, set it in `web/index.html` or inject via build (e.g. `inject-env.js` with `NEXT_PUBLIC_VAULT_API_BASE` or similar).

@@ -61,11 +61,19 @@
     return url;
   }
 
+  /** Strip redundant "Operators Titans" / "Operator Titans" prefix when podcast is titans. */
+  function titleForDisplay(rawTitle, podcast) {
+    if (!rawTitle || (podcast || '').toLowerCase() !== 'titans') return rawTitle;
+    var t = rawTitle.replace(/^\s*Operators?\s+Titans\s*[-:\s]*/i, '').trim();
+    return t || rawTitle;
+  }
+
   function renderHit(h) {
     const isMoment = h.type === 'moment';
-    const title = isMoment
+    const rawTitle = isMoment
       ? (h.speaker_label || 'Segment')
       : (h.title || h.headline_title || '(no title)');
+    const title = isMoment ? rawTitle : titleForDisplay(rawTitle, h.podcast);
     const snippet = isMoment
       ? (h.headline || h.text || '')
       : (h.headline_description || h.description || '');

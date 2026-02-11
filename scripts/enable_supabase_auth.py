@@ -31,10 +31,13 @@ API_BASE = "https://api.supabase.com/v1"
 
 
 def main() -> int:
-    token = os.environ.get("SUPABASE_MANAGEMENT_TOKEN", "").strip()
+    # Accept either name (Doppler may have it as supabase_api_key2)
+    token = (
+        os.environ.get("SUPABASE_MANAGEMENT_TOKEN") or os.environ.get("SUPABASE_API_KEY2") or ""
+    ).strip()
     if not token:
         print(
-            "SUPABASE_MANAGEMENT_TOKEN required. Create one at https://supabase.com/dashboard/account/tokens",
+            "SUPABASE_MANAGEMENT_TOKEN or SUPABASE_API_KEY2 required. Create at https://supabase.com/dashboard/account/tokens",
             file=sys.stderr,
         )
         return 1

@@ -77,16 +77,28 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 - `POST /sync` — run fetch-new then process-new in one call (for cron)  
 - `GET /health` — env and connectivity checks (database, youtube, deepgram, anthropic)  
 - `GET /search?q=...&podcast=...&category=...&video_id=...&limit=20&type_=insights|moments|all` — **private**; search via Postgres FTS (requires `Authorization: Bearer <supabase_access_token>`)
-- `GET /search-ui` — HTML search UI; paste Supabase access token to search (insights + moments, jump-to timestamp)
+- `GET /search-ui` — HTML search UI (Discover); paste token to search (insights + moments, jump-to timestamp)
+- `GET /episodes-ui` — Episodes catalog (Catalog); filter by podcast (9 Operators, Marketing, Finance, TITANS)
+- `GET /insights-ui` — Listen; browse insights by type (Quotes, Frameworks, Business ideas, etc.)
+- `GET /people-ui` — People directory
+- `GET /ask-ui` — Ask; chat over the vault (search + LLM reply with citations)
+- `GET /episodes`, `GET /insights`, `GET /people` — list endpoints (Bearer token); `POST /chat` — chat (Bearer token)
+- `GET /config` — public config (`apiBase`, `supabaseUrl`, `supabaseAnonKey`) for frontends
 - `POST /sync/async`, `POST /process-new/async` — like `/sync` and `/process-new` but return 202 with `job_id`; poll `GET /jobs/{job_id}` for status
 - `POST /seed-links` — JSON `{"links": [{video_id, podcast, title?, duration_seconds?, url?}]}`; upsert into `seed_links` (Supabase).  
-- `POST /seed-links/csv` — multipart CSVs (`9operators`, `marketing_operator`, `finance_operators`); upsert into `seed_links`.  
+- `POST /seed-links/csv` — multipart CSVs (`9operators`, `marketing_operator`, `finance_operators`, `titans`, `operators_and_titans`); upsert into `seed_links`.  
 - `POST /backfill` — run backfill from `seed_links`: seed into `videos` then process unprocessed. With optional CSV uploads: merge into `seed_links` first. With no body: use existing `seed_links`. Returns 202 + `job_id`; poll `GET /jobs/{job_id}`.  
 
 **n8n:**  
 - **Import via script** (after setting `N8N_HOST` and `N8N_API_KEY` in `.env`): `python scripts/import_n8n_workflow.py`  
 - Import `n8n-workflow.json` (one-off process) or `n8n-workflow-fetch-new.json` (cron: **daily** `POST /sync` recommended) in [entagency](https://entagency.app.n8n.cloud).  
 In the HTTP Request node, set the URL to your Pipeline API (e.g. `https://your-app.railway.app/process` or `/sync`). To process from a Webhook: add a Webhook trigger and change the Set node to `{{ $json.body.video_id }}` and `{{ $json.body.podcast }}`.
+
+## Deployment (GitHub → Railway + Vercel)
+
+- **Railway** runs the FastAPI app (`api.py`). Push to the connected branch (e.g. `master`) to trigger a deploy. All UI routes (`/search-ui`, `/episodes-ui`, `/insights-ui`, `/people-ui`, `/ask-ui`) and API endpoints are served from Railway. Set env in Railway → Variables (see `docs/DEPLOYMENT_ENV.md`).
+- **Vercel** can host the static front end in `web/` (root directory set to `web`). The nav in `web/index.html` links to the Railway API for Discover, Listen, Catalog, People, Ask, and API docs. Push to the same repo to update both; Vercel redeploys when the repo is connected.
+- **GitHub:** Repo is the single source. No secrets in the repo; use Railway and Vercel env (or Doppler for local). After pushing, confirm Railway deploy and, if using Vercel, that the build succeeds.
 
 ## Project layout
 
@@ -102,7 +114,7 @@ In the HTTP Request node, set the URL to your Pipeline API (e.g. `https://your-a
 - `deepgram_client.py` – Transcribe with diarization
 - `insight_extractor.py` – LLM extraction (Anthropic, Operators prompts)
 - `pipeline.py` – Orchestrator
-- `api.py` – FastAPI: `POST /process`, `POST /fetch-new`, `POST /process-new`, `POST /sync`, `POST /sync/async`, `POST /process-new/async`, `POST /seed-links`, `POST /seed-links/csv`, `POST /backfill`, `GET /jobs/{job_id}`, `GET /health`, `GET /search`, `GET /search-ui`
+- `api.py` – FastAPI: process, fetch-new, sync, backfill, seed-links/csv; GET /search, /search-ui, /episodes-ui, /insights-ui, /people-ui, /ask-ui, /episodes, /insights, /people, POST /chat, GET /config, /health, /jobs
 - `n8n-workflow.json` – n8n: one-off process video
 - `n8n-workflow-fetch-new.json` – n8n: cron every 6h, `POST /sync`
 - `scripts/run_all.py` – one-command: schema, optional --seed-csvs, fetch-new, process-new

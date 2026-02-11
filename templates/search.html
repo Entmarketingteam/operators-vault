@@ -13,7 +13,15 @@
   <div class="vault-app">
     <header class="vault-header">
       <div class="vault-header-inner">
-        <a href="{{ request.url_for('search_ui') }}" class="vault-logo">Operators <span>Vault</span></a>
+        <a href="/search-ui" class="vault-logo">Operators <span>Vault</span></a>
+        <nav class="vault-nav" style="display:flex; gap:1rem; align-items:center;">
+          <a href="/search-ui" style="color:inherit; text-decoration:none; font-weight:500;">Discover</a>
+          <a href="/insights-ui" style="color:inherit; text-decoration:none;">Listen</a>
+          <a href="/episodes-ui" style="color:inherit; text-decoration:none;">Catalog</a>
+          <a href="/people-ui" style="color:inherit; text-decoration:none;">People</a>
+          <a href="/ask-ui" style="color:inherit; text-decoration:none;">Ask</a>
+          <a href="/docs" target="_blank" rel="noopener" style="color:inherit; text-decoration:none;">API</a>
+        </nav>
         <div class="vault-auth">
           <div class="token-wrap">
             <input type="password" id="token" placeholder="Paste Supabase access token" title="From Supabase Auth after sign-in" autocomplete="off">
@@ -27,7 +35,12 @@
     <main>
       <section class="vault-hero">
         <h1>Search Operators Vault</h1>
-        <p class="subtitle">Explore insights and moments from 9 Operators, Marketing Operator, and Finance Operator.</p>
+        <p class="subtitle">Explore insights and moments from 9 Operators, Marketing Operator, Finance Operator, and TITANS.</p>
+        <div class="vault-shortcuts" style="margin-bottom:0.75rem;">
+          <span style="margin-right:0.5rem;">Show:</span>
+          <button type="button" class="vault-btn vault-btn-secondary vault-btn-sm" onclick="document.getElementById('podcast').value=''; document.getElementById('vault-search-form').requestSubmit();">All</button>
+          <button type="button" class="vault-btn vault-btn-secondary vault-btn-sm" onclick="document.getElementById('podcast').value='titans'; document.getElementById('vault-search-form').requestSubmit();">TITANS</button>
+        </div>
         <form id="vault-search-form" onsubmit="event.preventDefault(); window.VaultSearch();">
           <div class="vault-search-bar">
             <input type="search" name="q" placeholder="Try 'pricing' or 'framework'…" autofocus aria-label="Search">
@@ -40,6 +53,7 @@
               <option value="9operators">9 Operators</option>
               <option value="marketing_operator">Marketing Operator</option>
               <option value="finance_operators">Finance Operators</option>
+              <option value="titans">TITANS</option>
             </select>
             <label for="type_">Type</label>
             <select id="type_" name="type_">
@@ -73,7 +87,7 @@
     </footer>
   </div>
   <script>
-    window.VaultConfig = { apiBase: "{{ api_base }}" };
+    window.VaultConfig = { apiBase: "{{ api_base }}", supabaseUrl: "{{ supabase_url }}", supabaseAnonKey: "{{ supabase_anon_key }}" };
   </script>
   <script src="{{ static_prefix }}/js/vault.js"></script>
 </body>

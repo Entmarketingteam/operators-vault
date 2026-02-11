@@ -53,12 +53,29 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(_root / "static")), name="static")
 
 
+def _public_config() -> dict:
+    """Public config from env (for GET /config and search UI). All editable in Railway/Vercel."""
+    api_base = (os.environ.get("PUBLIC_API_BASE") or "").strip().rstrip("/")
+    return {
+        "apiBase": api_base,
+        "supabaseUrl": (os.environ.get("SUPABASE_URL") or "").strip(),
+        "supabaseAnonKey": (os.environ.get("SUPABASE_ANON_KEY") or "").strip(),
+    }
+
+
 def _render_search_ui() -> str:
     path = _root / "templates" / "search.html"
     if not path.exists():
         return "<!DOCTYPE html><html><body><h1>Operators Vault</h1><p>Template not found.</p></body></html>"
     html = path.read_text(encoding="utf-8")
-    return html.replace("{{ static_prefix }}", "/static").replace("{{ api_base }}", "").replace("{{ request.url_for('search_ui') }}", "/search-ui")
+    cfg = _public_config()
+    return (
+        html.replace("{{ static_prefix }}", "/static")
+        .replace("{{ api_base }}", cfg["apiBase"])
+        .replace("{{ supabase_url }}", cfg["supabaseUrl"])
+        .replace("{{ supabase_anon_key }}", cfg["supabaseAnonKey"])
+        .replace("{{ request.url_for('search_ui') }}", "/search-ui")
+    )
 _security = HTTPBearer(auto_error=False)
 
 
@@ -141,14 +158,14 @@ def seed_links(req: SeedLinksRequest):
 @app.post("/seed-links/csv")
 async def seed_links_csv(request: Request):
     """
-    Upload CSVs into seed_links. Multipart form: 9operators, marketing_operator, finance_operators (file fields).
+    Upload CSVs into seed_links. Multipart form: 9operators, marketing_operator, finance_operators, titans, or operators_and_titans (single combined CSV; podcast inferred per row from title).
     Does not run backfill. Returns {ok, upserted}.
     """
     from youtube_client import load_all_seed_csvs
     form = await request.form()
     tmpdir = Path(tempfile.mkdtemp(prefix="seed_links_csv_"))
     paths: dict[str, str] = {}
-    for key in ("9operators", "marketing_operator", "finance_operators"):
+    for key in ("9operators", "marketing_operator", "finance_operators", "titans", "operators_and_titans"):
         f = form.get(key)
         if f is not None and hasattr(f, "read"):
             raw = await f.read()
@@ -159,7 +176,7 @@ async def seed_links_csv(request: Request):
                 p.write_bytes(raw)
                 paths[key] = str(p)
     if not paths:
-        raise HTTPException(status_code=400, detail="Upload at least one CSV: 9operators, marketing_operator, finance_operators")
+        raise HTTPException(status_code=400, detail="Upload at least one CSV: 9operators, marketing_operator, finance_operators, titans, or operators_and_titans")
     rows = load_all_seed_csvs(paths=paths)
     n = _do_upsert_seed_links(rows)
     return {"ok": True, "upserted": n}
@@ -348,10 +365,309 @@ def search(
     return _search_postgres(q, podcast=podcast, category=category, video_id=video_id, limit=limit, type_=type_)
 
 
+def _list_episodes(podcast: str | None = None, limit: int = 100) -> dict:
+    """List videos (episodes) with optional podcast filter. For catalog."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    limit = min(limit, 500)
+    conn = psycopg2.connect(db_url, connect_timeout=10)
+    cur = conn.cursor()
+    try:
+        if podcast:
+            cur.execute(
+                """
+                SELECT video_id, title, podcast, duration_seconds, view_count, thumbnail_url, published_at
+                FROM videos
+                WHERE podcast = %s
+                ORDER BY published_at DESC NULLS LAST, created_at DESC
+                LIMIT %s
+                """,
+                (podcast, limit),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT video_id, title, podcast, duration_seconds, view_count, thumbnail_url, published_at
+                FROM videos
+                ORDER BY published_at DESC NULLS LAST, created_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+        rows = cur.fetchall()
+        episodes = [
+            {
+                "video_id": r[0],
+                "title": r[1] or "",
+                "podcast": r[2],
+                "duration_seconds": r[3],
+                "view_count": r[4],
+                "thumbnail_url": r[5],
+                "published_at": r[6].isoformat() if r[6] else None,
+            }
+            for r in rows
+        ]
+        return {"episodes": episodes, "total": len(episodes)}
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _list_people(limit: int = 200) -> dict:
+    """List people for directory."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    limit = min(limit, 500)
+    conn = psycopg2.connect(db_url, connect_timeout=10)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id, name, role_or_title FROM people ORDER BY name LIMIT %s",
+            (limit,),
+        )
+        rows = cur.fetchall()
+        people_list = [
+            {"id": str(r[0]), "name": r[1] or "", "role_or_title": r[2] or ""}
+            for r in rows
+        ]
+        return {"people": people_list, "total": len(people_list)}
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _list_insights(
+    category: str | None = None,
+    podcast: str | None = None,
+    limit: int = 50,
+) -> dict:
+    """List insights with optional category/podcast filter (for Listen pages)."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    limit = min(limit, 100)
+    conn = psycopg2.connect(db_url, connect_timeout=10)
+    cur = conn.cursor()
+    try:
+        if category and podcast:
+            cur.execute(
+                """
+                SELECT id, video_id, podcast, category, title, description, start_time_sec, end_time_sec
+                FROM insights
+                WHERE category = %s AND podcast = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (category, podcast, limit),
+            )
+        elif category:
+            cur.execute(
+                """
+                SELECT id, video_id, podcast, category, title, description, start_time_sec, end_time_sec
+                FROM insights
+                WHERE category = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (category, limit),
+            )
+        elif podcast:
+            cur.execute(
+                """
+                SELECT id, video_id, podcast, category, title, description, start_time_sec, end_time_sec
+                FROM insights
+                WHERE podcast = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (podcast, limit),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id, video_id, podcast, category, title, description, start_time_sec, end_time_sec
+                FROM insights
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (limit,),
+            )
+        rows = cur.fetchall()
+        hits = [
+            {
+                "type": "insight",
+                "id": str(r[0]),
+                "video_id": r[1],
+                "podcast": r[2],
+                "category": r[3],
+                "title": r[4],
+                "description": r[5],
+                "start_time_sec": float(r[6]) if r[6] is not None else None,
+                "end_time_sec": float(r[7]) if r[7] is not None else None,
+                "headline_title": r[4],
+                "headline_description": r[5],
+            }
+            for r in rows
+        ]
+        return {"category": category, "total": len(hits), "hits": hits}
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/episodes")
+def episodes(
+    podcast: str | None = None,
+    limit: int = 100,
+    _: dict = Depends(_verify_supabase_jwt),
+):
+    """List episodes (videos) for catalog. Optional podcast filter. Requires Bearer token."""
+    return _list_episodes(podcast=podcast, limit=limit)
+
+
+@app.get("/people")
+def people(
+    limit: int = 200,
+    _: dict = Depends(_verify_supabase_jwt),
+):
+    """List people for directory. Requires Bearer token."""
+    return _list_people(limit=limit)
+
+
+@app.get("/insights")
+def insights_list(
+    category: str | None = None,
+    podcast: str | None = None,
+    limit: int = 50,
+    _: dict = Depends(_verify_supabase_jwt),
+):
+    """List insights by category/podcast (for Listen pages). Requires Bearer token."""
+    return _list_insights(category=category, podcast=podcast, limit=limit)
+
+
+class ChatRequest(BaseModel):
+    message: str
+    context_limit: int = 10
+
+
+@app.post("/chat")
+def chat(
+    body: ChatRequest,
+    _: dict = Depends(_verify_supabase_jwt),
+):
+    """Ask the vault: search for relevant excerpts, then LLM reply with citations. Requires Bearer token."""
+    import anthropic
+    msg = (body.message or "").strip()
+    if not msg:
+        raise HTTPException(status_code=400, detail="message required")
+    db_url = os.environ.get("DATABASE_URL")
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not db_url or not api_key:
+        raise HTTPException(status_code=503, detail="DATABASE_URL or ANTHROPIC_API_KEY not set")
+    # Search for relevant context
+    search_result = _search_postgres(msg, limit=body.context_limit, type_="all")
+    hits = search_result.get("hits") or []
+    context_parts = []
+    for h in hits[: body.context_limit]:
+        vid = h.get("video_id") or ""
+        pod = (h.get("podcast") or "").replace("_", " ")
+        start = h.get("start_time_sec")
+        t = h.get("headline_title") or h.get("headline_description") or h.get("text") or h.get("headline") or ""
+        if start is not None:
+            context_parts.append(f"[{pod} | {vid} @ {int(start)}s] {t[:500]}")
+        else:
+            context_parts.append(f"[{pod} | {vid}] {t[:500]}")
+    context = "\n\n".join(context_parts) if context_parts else "No matching excerpts found."
+    system = (
+        "You are a helpful assistant answering questions based only on excerpts from the Operators Vault (podcast insights and moments). "
+        "Use only the provided excerpts. When you cite something, mention the show name and approximate timestamp (e.g. '9 Operators @ 12:30'). "
+        "If the excerpts do not contain relevant information, say so briefly."
+    )
+    user_content = f"Context from the vault:\n\n{context}\n\nQuestion: {msg}"
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        r = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            system=system,
+            messages=[{"role": "user", "content": user_content}],
+        )
+        reply = ""
+        if r.content and len(r.content) > 0 and hasattr(r.content[0], "text"):
+            reply = r.content[0].text
+        return {"reply": reply, "citations": len(hits)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chat failed: {e!s}")
+
+
+@app.get("/config")
+def config():
+    """Public config for frontends (API base URL, Supabase URL + anon key). Set in Railway/Vercel env."""
+    return _public_config()
+
+
+def _render_episodes_ui() -> str:
+    path = _root / "templates" / "episodes.html"
+    if not path.exists():
+        return "<!DOCTYPE html><html><body><h1>Operators Vault</h1><p>Episodes template not found.</p></body></html>"
+    html = path.read_text(encoding="utf-8")
+    cfg = _public_config()
+    return (
+        html.replace("{{ static_prefix }}", "/static")
+        .replace("{{ api_base }}", cfg["apiBase"])
+        .replace("{{ supabase_url }}", cfg["supabaseUrl"])
+        .replace("{{ supabase_anon_key }}", cfg["supabaseAnonKey"])
+    )
+
+
 @app.get("/search-ui", response_class=HTMLResponse)
 def search_ui():
     """Search UI: sign in (token), filters, and result cards. Uses templates/search.html and static assets."""
     return _render_search_ui()
+
+
+@app.get("/episodes-ui", response_class=HTMLResponse)
+def episodes_ui():
+    """Episodes catalog: list videos by show. Same auth as search."""
+    return _render_episodes_ui()
+
+
+def _render_template(name: str) -> str:
+    """Render a template with public config. Name = filename without .html."""
+    path = _root / "templates" / f"{name}.html"
+    if not path.exists():
+        return f"<!DOCTYPE html><html><body><h1>Operators Vault</h1><p>Template {name} not found.</p></body></html>"
+    html = path.read_text(encoding="utf-8")
+    cfg = _public_config()
+    return (
+        html.replace("{{ static_prefix }}", "/static")
+        .replace("{{ api_base }}", cfg["apiBase"])
+        .replace("{{ supabase_url }}", cfg["supabaseUrl"])
+        .replace("{{ supabase_anon_key }}", cfg["supabaseAnonKey"])
+    )
+
+
+@app.get("/people-ui", response_class=HTMLResponse)
+def people_ui():
+    """People directory. Same auth as search."""
+    return _render_template("people")
+
+
+@app.get("/insights-ui", response_class=HTMLResponse)
+def insights_ui():
+    """Listen: insights by type (query param type=quote|frameworks|...). Same auth as search."""
+    return _render_template("insights")
+
+
+@app.get("/ask-ui", response_class=HTMLResponse)
+def ask_ui():
+    """Ask: chat over the vault. Same auth as search."""
+    return _render_template("ask")
 
 
 @app.post("/sync")
@@ -403,7 +719,7 @@ def process_new_async():
 async def backfill(request: Request):
     """
     Run backfill from seed_links (Supabase): seed into videos then process unprocessed.
-    - With form files (9operators, marketing_operator, finance_operators): parse CSVs, upsert into seed_links, then run.
+    - With form files (9operators, marketing_operator, finance_operators, titans, or operators_and_titans): parse CSVs, upsert into seed_links, then run.
     - With no files: run from existing seed_links. Use POST /seed-links or /seed-links/csv first to store links.
     Returns 202 + job_id; poll GET /jobs/{job_id}.
     """
@@ -412,7 +728,7 @@ async def backfill(request: Request):
     form = await request.form()
     tmpdir = Path(tempfile.mkdtemp(prefix="backfill_"))
     paths: dict[str, str] = {}
-    for key in ("9operators", "marketing_operator", "finance_operators"):
+    for key in ("9operators", "marketing_operator", "finance_operators", "titans", "operators_and_titans"):
         f = form.get(key)
         if f is not None and hasattr(f, "read"):
             raw = await f.read()
@@ -518,6 +834,14 @@ def root():
         "stats": "/stats",
         "search": "/search",
         "search_ui": "/search-ui",
+        "episodes": "/episodes",
+        "episodes_ui": "/episodes-ui",
+        "people": "/people",
+        "people_ui": "/people-ui",
+        "insights": "/insights",
+        "insights_ui": "/insights-ui",
+        "chat": "POST /chat",
+        "ask_ui": "/ask-ui",
         "sync": "POST /sync",
         "sync_async": "POST /sync/async (202 + job)",
         "process_new_async": "POST /process-new/async (202 + job)",
