@@ -80,7 +80,12 @@ def main() -> int:
         return 1
 
     wid1 = _ensure_workflow(ROOT / "n8n-workflow.json", "Operators Vault – Process Video", f"{BASE}/process")
-    wid2 = _ensure_workflow(ROOT / "n8n-workflow-fetch-new.json", "Operators Vault – Sync New Episodes", f"{BASE}/sync")
+    # Use GET /trigger-sync (returns 202 immediately, avoids Railway 502)
+    sync_key = os.environ.get("SYNC_TRIGGER_KEY", "").strip()
+    sync_url = f"{BASE}/trigger-sync"
+    if sync_key:
+        sync_url += f"?key={sync_key}"
+    wid2 = _ensure_workflow(ROOT / "n8n-workflow-fetch-new.json", "Operators Vault – Sync New Episodes", sync_url)
 
     # Activate sync: try PUT with active, else POST /activate
     for method, path, body in [

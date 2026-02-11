@@ -17,20 +17,20 @@
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [0, 0],
-      "notes": "Runs every 6h at :00. For cron use: rule.interval.[{ field: 'cronExpression', expression: '0 9 * * *' }]."
+      "notes": "Runs every 6 hours at :00 (0 6,12,18,0 * * *). To run every 3 hours: '0 */3 * * *'. To run every hour: '0 * * * *'. For daily at 9am UTC: '0 9 * * *'."
     },
     {
       "parameters": {
-        "method": "POST",
-        "url": "http://localhost:8000/sync",
-        "options": { "timeout": 600000 }
+        "method": "GET",
+        "url": "http://localhost:8000/trigger-sync",
+        "options": { "timeout": 30000 }
       },
       "id": "b2c3d4e5-0001-4000-8000-000000000002",
-      "name": "POST /sync",
+      "name": "GET /trigger-sync",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [260, 0],
-      "notes": "Set url to your Pipeline API: https://your-app.railway.app/sync or http://localhost:8000/sync when running locally. /sync runs fetch-new then process-new."
+      "notes": "Set url to your Railway API: https://your-app.railway.app/trigger-sync. Returns 202 + job_id immediately; sync runs in background. Use GET /trigger-sync?key=SYNC_TRIGGER_KEY if SYNC_TRIGGER_KEY is set in Railway."
     }
   ],
   "connections": {

@@ -89,10 +89,10 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 - `POST /seed-links/csv` — multipart CSVs (`9operators`, `marketing_operator`, `finance_operators`, `titans`, `operators_and_titans`); upsert into `seed_links`.  
 - `POST /backfill` — run backfill from `seed_links`: seed into `videos` then process unprocessed. With optional CSV uploads: merge into `seed_links` first. With no body: use existing `seed_links`. Returns 202 + `job_id`; poll `GET /jobs/{job_id}`.  
 
-**n8n:**  
-- **Import via script** (after setting `N8N_HOST` and `N8N_API_KEY` in `.env`): `python scripts/import_n8n_workflow.py`  
-- Import `n8n-workflow.json` (one-off process) or `n8n-workflow-fetch-new.json` (cron: **daily** `POST /sync` recommended) in [entagency](https://entagency.app.n8n.cloud).  
-In the HTTP Request node, set the URL to your Pipeline API (e.g. `https://your-app.railway.app/process` or `/sync`). To process from a Webhook: add a Webhook trigger and change the Set node to `{{ $json.body.video_id }}` and `{{ $json.body.podcast }}`.
+**Automatic sync (new videos auto-processed):**  
+- **Railway Cron Job** (recommended): Railway → New → Cron Job, schedule `0 */3 * * *` (every 3 hours), command: `curl -X GET "https://your-app.railway.app/trigger-sync"`. See `docs/AUTOMATIC_SYNC.md`.  
+- **n8n workflow:** Run `python scripts/setup_n8n_workflows.py` (sets up workflow calling `GET /trigger-sync` every 6 hours). Then activate "Operators Vault – Sync New Episodes" in n8n.  
+- **Manual:** `GET /trigger-sync` or `POST /sync/async` (returns 202 + job_id; poll `GET /jobs/{job_id}`).
 
 ## Deployment (GitHub → Railway + Vercel)
 
