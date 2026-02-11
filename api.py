@@ -271,7 +271,16 @@ def health():
         except Exception as e:
             checks["database"] = f"error: {e!s}"
 
-    checks["youtube"] = "ok" if os.environ.get("YOUTUBE_API_KEY") else "missing"
+    # Check YouTube API key and library availability
+    youtube_key = os.environ.get("YOUTUBE_API_KEY")
+    if not youtube_key:
+        checks["youtube"] = "missing"
+    else:
+        try:
+            from googleapiclient.discovery import build
+            checks["youtube"] = "ok"
+        except ImportError:
+            checks["youtube"] = "error: google-api-python-client not installed"
     checks["deepgram"] = "ok" if os.environ.get("DEEPGRAM_API_KEY") else "missing"
     checks["anthropic"] = "ok" if os.environ.get("ANTHROPIC_API_KEY") else "missing"
     checks["search"] = "postgres"
