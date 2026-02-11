@@ -59,20 +59,36 @@
       if (!token) { showError(container, "Paste a Supabase access token above."); return; }
       setToken(token);
       var typeEl = document.getElementById("insights-type");
+      var panzerEl = document.getElementById("insights-panzerism");
       var type = (typeEl && typeEl.value) || "quote";
+      var isPanzer = panzerEl && panzerEl.checked;
       var category = TYPE_TO_CATEGORY[type] || "Quotes";
       var label = TYPE_LABELS[type] || type;
+      if (isPanzer && type === "quote") label = "Panzerisms";
       document.getElementById("insights-title").textContent = label;
       document.getElementById("insights-subtitle").textContent = "Insights from the vault.";
       container.innerHTML = "<div class=\"vault-loading\">Loading…</div>";
       var apiBase = window.VaultConfig?.apiBase || "";
-      fetch(apiBase + "/insights?category=" + encodeURIComponent(category) + "&limit=50", { method: "GET", headers: { Authorization: "Bearer " + token } })
-        .then(function (r) { return r.json().then(function (j) {
-          if (r.status === 401) showError(container, "Invalid or expired token.");
-          else if (!r.ok) showError(container, j.detail || "Request failed");
-          else showInsights(container, j);
-        }); })
-        .catch(function (err) { showError(container, err.message || "Network error"); });
+      var url = apiBase + "/insights?category=" + encodeURIComponent(category) + "&limit=50";
+      if (isPanzer) {
+        // Use search with is_panzerism filter instead
+        url = apiBase + "/search?q=" + encodeURIComponent(category) + "&category=" + encodeURIComponent(category) + "&is_panzerism=true&limit=50";
+        fetch(url, { method: "GET", headers: { Authorization: "Bearer " + token } })
+          .then(function (r) { return r.json().then(function (j) {
+            if (r.status === 401) showError(container, "Invalid or expired token.");
+            else if (!r.ok) showError(container, j.detail || "Request failed");
+            else showInsights(container, j);
+          }); })
+          .catch(function (err) { showError(container, err.message || "Network error"); });
+      } else {
+        fetch(url, { method: "GET", headers: { Authorization: "Bearer " + token } })
+          .then(function (r) { return r.json().then(function (j) {
+            if (r.status === 401) showError(container, "Invalid or expired token.");
+            else if (!r.ok) showError(container, j.detail || "Request failed");
+            else showInsights(container, j);
+          }); })
+          .catch(function (err) { showError(container, err.message || "Network error"); });
+      }
     },
   };
   document.addEventListener("DOMContentLoaded", function () {

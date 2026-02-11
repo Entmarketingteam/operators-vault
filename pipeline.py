@@ -317,8 +317,8 @@ def _process_one(
             st, et = u.get("start"), u.get("end")
             if st is not None and et is not None:
                 cur.execute(
-                    "INSERT INTO segments (transcription_id, start_time_sec, end_time_sec, text, speaker_label, video_id, podcast) VALUES (%s,%s,%s,%s,%s,%s,%s)",
-                    (trans_id, float(st), float(et), (u.get("transcript") or ""), str(u.get("speaker") or ""), video_id, podcast),
+                    "INSERT INTO segments (transcription_id, start_time_sec, end_time_sec, text, speaker_label) VALUES (%s,%s,%s,%s,%s)",
+                    (trans_id, float(st), float(et), (u.get("transcript") or ""), str(u.get("speaker") or "")),
                 )
         conn.commit()
 
@@ -333,16 +333,24 @@ def _process_one(
             all_insights.append(it)
 
     # 6) For each: title, timestamps, framework; insert into Postgres (FTS indexes auto-update)
+    # Phase 2: Import extractors
+    if db_url:
+        from company_extractor import extract_companies_from_text, link_insights_to_companies, link_video_to_companies
+        from people_extractor import extract_people_from_segments, link_insights_to_people
     if db_url:
         import psycopg2
 
         conn = psycopg2.connect(db_url)
         cur = conn.cursor()
         cur.execute("DELETE FROM insights WHERE video_id = %s", (video_id,))
+        # Phase 2: Extract people from segments
+        speaker_to_id = extract_people_from_segments(cur, video_id)
     else:
         conn = None
         cur = None
+        speaker_to_id = {}
 
+    insight_ids: list[str] = []
     for j, it in enumerate(all_insights):
         cat = it.get("category") or ""
         title = (it.get("title") or "").strip()
@@ -359,6 +367,7 @@ def _process_one(
         if "ramework" in cat or cat == "Frameworks and exercises":
             fw = make_framework(title or "Framework", it.get("_chunk", ""), prompt_set=prompt_set)
         ins_id = str(uuid.uuid4())
+        insight_ids.append(ins_id)
         if cur:
             cur.execute(
                 """
@@ -367,8 +376,39 @@ def _process_one(
                 """,
                 (ins_id, video_id, podcast, cat, title, desc, start_sec, end_sec, fw or None, (it.get("_chunk") or "")[:8000]),
             )
+            # Phase 2: Extract companies from insight text
+            if db_url:
+                insight_text = f"{title} {desc}"
+                companies = extract_companies_from_text(insight_text)
+                if companies:
+                    link_insights_to_companies(cur, ins_id, companies)
 
     if conn:
+        # Phase 2: Link insights to people based on speaker_label
+        if speaker_to_id:
+            link_insights_to_people(cur, video_id, speaker_to_id)
+        # Phase 2: Extract companies from video title/description
+        if db_url:
+            cur.execute("SELECT title, description FROM videos WHERE video_id = %s", (video_id,))
+            vrow = cur.fetchone()
+            if vrow and (vrow[0] or vrow[1]):
+                video_text = f"{vrow[0] or ''} {vrow[1] or ''}"
+                companies = extract_companies_from_text(video_text)
+                if companies:
+                    link_video_to_companies(cur, video_id, companies)
+        # Phase 3: Extract visual moments
+        if db_url:
+            from visual_extractor import extract_visual_moments
+            cur.execute("DELETE FROM visual_moments WHERE video_id = %s", (video_id,))
+            visuals = extract_visual_moments(raw, timestamped)
+            for v in visuals:
+                cur.execute(
+                    """
+                    INSERT INTO visual_moments (video_id, podcast, start_time_sec, end_time_sec, description, transcript_excerpt)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (video_id, podcast, v["start_time_sec"], v.get("end_time_sec"), v.get("description", "")[:500], v.get("transcript_excerpt", "")[:1000]),
+                )
         conn.commit()
         cur.close()
         conn.close()

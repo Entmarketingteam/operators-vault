@@ -19,14 +19,15 @@
 
 | Area | What |
 |------|------|
-| Schema | `videos`, `transcriptions`, `segments`, `insights`, `people`, `video_people`; Phase 1: `view_count`, `like_count`, `thumbnail_url`, etc.; `titans` podcast |
-| run_schema | Applies `sql/schema.sql`; run_migrate_phase1 (YouTube stats + TITANS) |
+| Schema | `videos`, `transcriptions`, `segments`, `insights`, `people`, `video_people`; Phase 1: `view_count`, `like_count`, `thumbnail_url`, etc.; `titans` podcast; Phase 2: `companies`, `insight_companies`, `video_companies`, `insight_people`, slugs; Phase 3: `visual_moments` |
+| Migrations | Phase 1 (YouTube stats + TITANS), Phase 2 (People & Companies), Phase 3 (Visual moments); all integrated into `run_all.py` |
 | youtube_client | load_from_csv (incl. operators_and_titans, infer_podcast_from_title), fetch_channel_videos, fetch_playlist_videos (TITANS), DEFAULT_CSV_PATHS |
-| pipeline | --seed-csvs, --seed-csvs-to-db, --seed-from-db, --fetch-new (incl. TITANS playlist), --process-new; titans in CLI |
-| api | POST /process, /fetch-new, /process-new, /sync, /sync/async, /backfill, /seed-links/csv (incl. operators_and_titans); GET /search, /search-ui, /episodes, /episodes-ui, /people, /config, /health, /stats |
-| UI | Search (Discover), Episodes catalog (Catalog) with nav; TITANS in filters; title strip for TITANS display |
+| pipeline | --seed-csvs, --seed-csvs-to-db, --seed-from-db, --fetch-new (incl. TITANS playlist), --process-new; titans in CLI; Phase 2: people extraction from segments, companies extraction from insights/videos; Phase 3: visual moments extraction |
+| Extraction | `people_extractor.py` (speaker_label → people, link insights), `company_extractor.py` (LLM extraction), `visual_extractor.py` (screen-share/slide detection) |
+| api | POST /process, /fetch-new, /process-new, /sync, /sync/async, /backfill, /seed-links/csv; GET /search (person_id, company_id, is_panzerism filters), /search-ui, /episodes, /episodes-ui, /people, /people-ui, /insights, /insights-ui, /chat, /ask-ui, /person/{slug}, /person-ui/{slug}, /company/{slug}, /company-ui/{slug}, /visuals, /related, /config, /health, /stats |
+| UI | Search (Discover) with copy link, person/company filters, Panzerisms checkbox; Episodes catalog (Catalog); People directory (links to person-ui); Insights by type (Listen) with Panzerisms filter; Ask/Chat; Person detail pages; Company detail pages |
 | Doppler | docs/DOPPLER.md; run_with_doppler.py; enable_supabase_auth accepts SUPABASE_API_KEY2 |
-| Scripts | run_all (--csv-only, --migration-only), run_migrate_phase1, run_with_doppler (migrate, run_all) |
+| Scripts | run_all (--csv-only, --migration-only, runs all 3 migrations), run_migrate_phase1, run_migrate_phase2, run_migrate_phase3, run_with_doppler |
 
 ---
 
@@ -40,9 +41,10 @@
 
 ## Next Steps (When Picking Up)
 
-1. **Done:** Postgres search migration applied; `SUPABASE_JWT_SECRET` on Railway; Supabase Auth (Email + Google) enabled via `enable_supabase_auth.py`; n8n sync daily; Google OAuth in Supabase.
-2. **Optional backfill:** `python pipeline.py --seed-csvs --process-all` (CSVs in `%USERPROFILE%\Downloads\`).
-3. **If “keep building”:** Add Supabase JS sign-in on `/search-ui`; more search filters; custom domain.
+1. **Done:** All phases complete. Postgres search migration applied; `SUPABASE_JWT_SECRET` on Railway; Supabase Auth (Email + Google) enabled via `enable_supabase_auth.py`; n8n sync daily; Google OAuth in Supabase.
+2. **Run migrations:** `python scripts/run_all.py --migration-only` to apply Phase 2 and 3 migrations if not already done.
+3. **Optional backfill:** `python pipeline.py --seed-csvs --process-all` (CSVs in `%USERPROFILE%\Downloads\`) to populate data.
+4. **If “keep building”:** Add Supabase JS sign-in on `/search-ui`; enhance facets sidebar with dynamic person/company lists; custom domain; visual moments UI page.
 
 ---
 

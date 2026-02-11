@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Operators Vault – Listen</title>
+  <title>Operators Vault – Company</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -16,7 +16,7 @@
         <a href="/search-ui" class="vault-logo">Operators <span>Vault</span></a>
         <nav class="vault-nav" style="display:flex; gap:1rem; align-items:center;">
           <a href="/search-ui">Discover</a>
-          <a href="/insights-ui" style="font-weight:500;">Listen</a>
+          <a href="/insights-ui">Listen</a>
           <a href="/episodes-ui">Catalog</a>
           <a href="/people-ui">People</a>
           <a href="/ask-ui">Ask</a>
@@ -25,37 +25,23 @@
         <div class="vault-auth">
           <div class="token-wrap">
             <input type="password" id="token" placeholder="Paste token" autocomplete="off">
-            <button type="button" class="vault-btn vault-btn-primary" onclick="window.VaultInsights && window.VaultInsights.load()">Load</button>
           </div>
         </div>
       </div>
     </header>
     <main>
       <section class="vault-hero">
-        <h1 id="insights-title">Listen</h1>
-        <p class="subtitle" id="insights-subtitle">Browse by type. Use the same token as Search.</p>
-        <div class="vault-filters" style="margin-bottom:1rem;">
-          <label for="insights-type">Type</label>
-          <select id="insights-type">
-            <option value="quote">Quotes</option>
-            <option value="frameworks">Frameworks</option>
-            <option value="business_ideas">Business ideas</option>
-            <option value="opinions">Points of view</option>
-            <option value="stories">Stories</option>
-            <option value="product">Products</option>
-          </select>
-          <label for="insights-panzerism" style="display:flex; align-items:center; gap:0.5rem; margin-left:1rem;">
-            <input type="checkbox" id="insights-panzerism" style="width:auto;">
-            Panzerisms only
-          </label>
-          <button type="button" class="vault-btn vault-btn-secondary" onclick="window.VaultInsights && window.VaultInsights.load()">Apply</button>
-        </div>
+        <h1 id="company-name">Company</h1>
+        <p class="subtitle" id="company-type"></p>
+        <p id="company-desc" style="margin-top:1rem;"></p>
       </section>
-      <div id="vault-insights"><p class="vault-empty">Paste your token and click Load.</p></div>
+      <div id="vault-company-content">
+        <p class="vault-empty">Paste your token and the page will load.</p>
+      </div>
     </main>
     <footer class="vault-footer">Private vault · <a href="/search-ui">Search</a> · <a href="/docs">Docs</a></footer>
   </div>
   <script>window.VaultConfig = { apiBase: "{{ api_base }}" };</script>
-  <script src="{{ static_prefix }}/js/insights.js"></script>
+  <script src="{{ static_prefix }}/js/company.js"></script>
 </body>
 </html>

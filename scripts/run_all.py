@@ -65,6 +65,10 @@ def main() -> int:
     else:
         if not _run([sys.executable, "scripts/run_migrate_phase1.py"], "Phase 1 migration (YouTube stats + TITANS)"):
             return 1
+        if not _run([sys.executable, "scripts/run_migrate_phase2.py"], "Phase 2 migration (People & Companies)"):
+            return 1
+        if not _run([sys.executable, "scripts/run_migrate_phase3.py"], "Phase 3 migration (Visual moments)"):
+            return 1
     if args.migration_only:
         return 0
 

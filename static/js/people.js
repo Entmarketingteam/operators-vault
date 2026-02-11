@@ -8,12 +8,14 @@
   function showPeople(container, data) {
     var list = data.people || [];
     var html = "<div class=\"vault-results-header\"><strong>" + (data.total || list.length) + "</strong> people</div>";
-    html += "<div style=\"display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:1rem; margin-top:1rem;\">";
-    list.forEach(function (p) {
-      html += "<div class=\"vault-card\"><h3 class=\"vault-card-title\">" + escapeHtml(p.name) + "</h3>";
-      if (p.role_or_title) html += "<p class=\"vault-card-meta\">" + escapeHtml(p.role_or_title) + "</p>";
-      html += "</div>";
-    });
+      html += "<div style=\"display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:1rem; margin-top:1rem;\">";
+      list.forEach(function (p) {
+        var slug = (p.name || "").toLowerCase().replace(/[^\w\s-]/g, "").replace(/[-\s]+/g, "-").trim("-");
+        var url = (window.VaultConfig?.apiBase || "") + "/person-ui/" + encodeURIComponent(slug);
+        html += "<div class=\"vault-card\"><h3 class=\"vault-card-title\"><a href=\"" + escapeHtml(url) + "\" style=\"color:inherit; text-decoration:none;\">" + escapeHtml(p.name) + "</a></h3>";
+        if (p.role_or_title) html += "<p class=\"vault-card-meta\">" + escapeHtml(p.role_or_title) + "</p>";
+        html += "</div>";
+      });
     html += "</div>";
     if (list.length === 0) html += "<p class=\"vault-empty\">No people in the directory yet.</p>";
     container.innerHTML = html;

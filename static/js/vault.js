@@ -25,6 +25,9 @@
     if (formData.get('podcast')) params.set('podcast', formData.get('podcast'));
     if (formData.get('category')) params.set('category', formData.get('category'));
     if (formData.get('type_')) params.set('type_', formData.get('type_'));
+    if (formData.get('person_id')) params.set('person_id', formData.get('person_id'));
+    if (formData.get('company_id')) params.set('company_id', formData.get('company_id'));
+    if (formData.get('is_panzerism') === 'true' || formData.get('is_panzerism') === '1') params.set('is_panzerism', 'true');
     params.set('limit', formData.get('limit') || '20');
     return params;
   }
@@ -91,10 +94,24 @@
     );
   }
 
+  function copySearchLink() {
+    const form = document.getElementById('vault-search-form');
+    if (!form) return;
+    const formData = new FormData(form);
+    const params = buildSearchParams(formData);
+    const url = window.location.origin + window.location.pathname + '?' + params.toString();
+    navigator.clipboard.writeText(url).then(function () {
+      alert('Link copied to clipboard!');
+    }).catch(function () {
+      prompt('Copy this link:', url);
+    });
+  }
+
   function showResult(outEl, data) {
     const total = data.total || 0;
     const hits = data.hits || [];
-    let html = '<div class="vault-results-header"><span class="vault-results-count"><strong>' + total + '</strong> result' + (total === 1 ? '' : 's') + '</span></div>';
+    let html = '<div class="vault-results-header"><span class="vault-results-count"><strong>' + total + '</strong> result' + (total === 1 ? '' : 's') + '</span>';
+    html += '<button type="button" class="vault-btn vault-btn-secondary vault-btn-sm" onclick="window.VaultSearch && window.VaultSearch.copyLink()" style="margin-left:1rem;">Copy link</button></div>';
     if (hits.length) {
       html += '<div class="vault-results-list">';
       hits.forEach(function (h) {
@@ -106,6 +123,9 @@
     }
     outEl.innerHTML = html;
   }
+
+  window.VaultSearch = window.VaultSearch || {};
+  window.VaultSearch.copyLink = copySearchLink;
 
   function showError(outEl, message) {
     outEl.innerHTML = '<div class="vault-err">' + escapeHtml(message) + '</div>';

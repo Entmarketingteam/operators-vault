@@ -285,6 +285,9 @@ def _search_postgres(
     podcast: str | None = None,
     category: str | None = None,
     video_id: str | None = None,
+    person_id: str | None = None,
+    company_id: str | None = None,
+    is_panzerism: bool = False,
     limit: int = 20,
     type_: str = "insights",
 ) -> dict:
@@ -345,6 +348,54 @@ def _search_postgres(
         finally:
             cur.close()
             conn.close()
+    # Phase 2: Filter by person_id or company_id (post-search filter)
+    if person_id or company_id or is_panzerism:
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+        cur = conn.cursor()
+        try:
+            filtered_hits = []
+            for h in hits:
+                ins_id = h.get("id")
+                if not ins_id:
+                    continue
+                # Check person filter
+                if person_id:
+                    cur.execute(
+                        "SELECT 1 FROM insight_people WHERE insight_id = %s AND person_id = %s",
+                        (ins_id, person_id),
+                    )
+                    if not cur.fetchone():
+                        continue
+                # Check company filter
+                if company_id:
+                    cur.execute(
+                        "SELECT 1 FROM insight_companies WHERE insight_id = %s AND company_id = %s",
+                        (ins_id, company_id),
+                    )
+                    if not cur.fetchone():
+                        continue
+                # Check Panzerisms (speaker = Jason Panzer)
+                if is_panzerism:
+                    # Find person_id for "Jason Panzer" or similar
+                    cur.execute(
+                        "SELECT id FROM people WHERE LOWER(name) LIKE %s",
+                        ("%panzer%",),
+                    )
+                    panzer_id = cur.fetchone()
+                    if panzer_id:
+                        cur.execute(
+                            "SELECT 1 FROM insight_people WHERE insight_id = %s AND person_id = %s",
+                            (ins_id, str(panzer_id[0])),
+                        )
+                        if not cur.fetchone():
+                            continue
+                    else:
+                        continue
+                filtered_hits.append(h)
+            hits = filtered_hits[:limit]
+        finally:
+            cur.close()
+            conn.close()
     if type_ == "all" and hits:
         hits.sort(key=lambda h: h.get("rank") or 0, reverse=True)
         hits = hits[:limit]
@@ -357,12 +408,15 @@ def search(
     podcast: str | None = None,
     category: str | None = None,
     video_id: str | None = None,
+    person_id: str | None = None,
+    company_id: str | None = None,
+    is_panzerism: bool = False,
     limit: int = 20,
     type_: str = "insights",
     _: dict = Depends(_verify_supabase_jwt),
 ):
-    """Search insights and/or timestamp moments via Postgres FTS. Requires Bearer token (Supabase Auth). Params: q, podcast, category, video_id, limit, type=insights|moments|all."""
-    return _search_postgres(q, podcast=podcast, category=category, video_id=video_id, limit=limit, type_=type_)
+    """Search insights and/or timestamp moments via Postgres FTS. Requires Bearer token (Supabase Auth). Params: q, podcast, category, video_id, person_id, company_id, is_panzerism, limit, type=insights|moments|all."""
+    return _search_postgres(q, podcast=podcast, category=category, video_id=video_id, person_id=person_id, company_id=company_id, is_panzerism=is_panzerism, limit=limit, type_=type_)
 
 
 def _list_episodes(podcast: str | None = None, limit: int = 100) -> dict:
@@ -539,6 +593,286 @@ def people(
     return _list_people(limit=limit)
 
 
+def _get_person_by_slug(slug: str) -> dict:
+    """Get person by slug with episodes and insights."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    conn = psycopg2.connect(db_url, connect_timeout=10)
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id, name, role_or_title, bio FROM people WHERE slug = %s", (slug,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Person not found")
+        person_id, name, role, bio = row
+        # Get episodes
+        cur.execute(
+            """
+            SELECT DISTINCT v.video_id, v.title, v.podcast, v.published_at
+            FROM videos v
+            JOIN video_people vp ON vp.video_id = v.video_id
+            WHERE vp.person_id = %s
+            ORDER BY v.published_at DESC NULLS LAST
+            LIMIT 50
+            """,
+            (person_id,),
+        )
+        episodes = [
+            {
+                "video_id": r[0],
+                "title": r[1] or "",
+                "podcast": r[2],
+                "published_at": r[3].isoformat() if r[3] else None,
+            }
+            for r in cur.fetchall()
+        ]
+        # Get insights (quotes, frameworks)
+        cur.execute(
+            """
+            SELECT i.id, i.video_id, i.podcast, i.category, i.title, i.description, i.start_time_sec
+            FROM insights i
+            JOIN insight_people ip ON ip.insight_id = i.id
+            WHERE ip.person_id = %s
+            ORDER BY i.created_at DESC
+            LIMIT 50
+            """,
+            (person_id,),
+        )
+        insights = [
+            {
+                "id": str(r[0]),
+                "video_id": r[1],
+                "podcast": r[2],
+                "category": r[3],
+                "title": r[4],
+                "description": r[5],
+                "start_time_sec": float(r[6]) if r[6] is not None else None,
+            }
+            for r in cur.fetchall()
+        ]
+        return {
+            "id": str(person_id),
+            "name": name or "",
+            "role_or_title": role or "",
+            "bio": bio or "",
+            "slug": slug,
+            "episodes": episodes,
+            "insights": insights,
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _get_company_by_slug(slug: str) -> dict:
+    """Get company by slug with episodes and insights."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    conn = psycopg2.connect(db_url, connect_timeout=10)
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT id, name, type, description FROM companies WHERE slug = %s", (slug,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Company not found")
+        company_id, name, comp_type, desc = row
+        # Get episodes
+        cur.execute(
+            """
+            SELECT DISTINCT v.video_id, v.title, v.podcast, v.published_at
+            FROM videos v
+            JOIN video_companies vc ON vc.video_id = v.video_id
+            WHERE vc.company_id = %s
+            ORDER BY v.published_at DESC NULLS LAST
+            LIMIT 50
+            """,
+            (company_id,),
+        )
+        episodes = [
+            {
+                "video_id": r[0],
+                "title": r[1] or "",
+                "podcast": r[2],
+                "published_at": r[3].isoformat() if r[3] else None,
+            }
+            for r in cur.fetchall()
+        ]
+        # Get insights
+        cur.execute(
+            """
+            SELECT i.id, i.video_id, i.podcast, i.category, i.title, i.description, i.start_time_sec
+            FROM insights i
+            JOIN insight_companies ic ON ic.insight_id = i.id
+            WHERE ic.company_id = %s
+            ORDER BY i.created_at DESC
+            LIMIT 50
+            """,
+            (company_id,),
+        )
+        insights = [
+            {
+                "id": str(r[0]),
+                "video_id": r[1],
+                "podcast": r[2],
+                "category": r[3],
+                "title": r[4],
+                "description": r[5],
+                "start_time_sec": float(r[6]) if r[6] is not None else None,
+            }
+            for r in cur.fetchall()
+        ]
+        return {
+            "id": str(company_id),
+            "name": name or "",
+            "type": comp_type or "other",
+            "description": desc or "",
+            "slug": slug,
+            "episodes": episodes,
+            "insights": insights,
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/person/{slug}")
+def person_detail(
+    slug: str,
+    _: dict = Depends(_verify_supabase_jwt),
+):
+    """Get person by slug with episodes and insights. Requires Bearer token."""
+    return _get_person_by_slug(slug)
+
+
+@app.get("/company/{slug}")
+def company_detail(
+    slug: str,
+    _: dict = Depends(_verify_supabase_jwt),
+):
+    """Get company by slug with episodes and insights. Requires Bearer token."""
+    return _get_company_by_slug(slug)
+
+
+def _search_visuals(
+    q: str,
+    podcast: str | None = None,
+    video_id: str | None = None,
+    limit: int = 20,
+) -> dict:
+    """Search visual moments. Returns {query, total, hits}."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    limit = min(limit, 100)
+    conn = psycopg2.connect(db_url, connect_timeout=10)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id, video_id, podcast, start_time_sec, end_time_sec, description, transcript_excerpt, rank FROM search_visual_moments(%s, %s, 0, %s, %s)",
+            (q.strip() if q else "", limit, podcast, video_id),
+        )
+        hits = [
+            {
+                "type": "visual",
+                "id": str(r[0]),
+                "video_id": r[1],
+                "podcast": r[2],
+                "start_time_sec": float(r[3]) if r[3] is not None else None,
+                "end_time_sec": float(r[4]) if r[4] is not None else None,
+                "description": r[5],
+                "transcript_excerpt": r[6],
+                "rank": float(r[7]) if r[7] is not None else 0,
+            }
+            for r in cur.fetchall()
+        ]
+        return {"query": q or "(all)", "total": len(hits), "hits": hits}
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/visuals")
+def visuals_search(
+    q: str = "",
+    podcast: str | None = None,
+    video_id: str | None = None,
+    limit: int = 20,
+    _: dict = Depends(_verify_supabase_jwt),
+):
+    """Search visual moments (screen-shares, slides). Requires Bearer token."""
+    return _search_visuals(q, podcast=podcast, video_id=video_id, limit=limit)
+
+
+def _get_related_content(video_id: str, insight_id: str | None = None, limit: int = 5) -> dict:
+    """Get related insights from the same video or similar videos."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    conn = psycopg2.connect(db_url, connect_timeout=10)
+    cur = conn.cursor()
+    try:
+        if insight_id:
+            # Get related from same video, excluding this insight
+            cur.execute(
+                """
+                SELECT id, video_id, podcast, category, title, description, start_time_sec
+                FROM insights
+                WHERE video_id = (SELECT video_id FROM insights WHERE id = %s)
+                  AND id != %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (insight_id, insight_id, limit),
+            )
+        else:
+            # Get related from same video
+            cur.execute(
+                """
+                SELECT id, video_id, podcast, category, title, description, start_time_sec
+                FROM insights
+                WHERE video_id = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (video_id, limit),
+            )
+        hits = [
+            {
+                "id": str(r[0]),
+                "video_id": r[1],
+                "podcast": r[2],
+                "category": r[3],
+                "title": r[4],
+                "description": r[5],
+                "start_time_sec": float(r[6]) if r[6] is not None else None,
+            }
+            for r in cur.fetchall()
+        ]
+        return {"related": hits, "total": len(hits)}
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/related")
+def related_content(
+    video_id: str | None = None,
+    insight_id: str | None = None,
+    limit: int = 5,
+    _: dict = Depends(_verify_supabase_jwt),
+):
+    """Get related insights (same video or similar). Requires Bearer token."""
+    if not video_id and not insight_id:
+        raise HTTPException(status_code=400, detail="video_id or insight_id required")
+    return _get_related_content(video_id or "", insight_id, limit=limit)
+
+
 @app.get("/insights")
 def insights_list(
     category: str | None = None,
@@ -668,6 +1002,18 @@ def insights_ui():
 def ask_ui():
     """Ask: chat over the vault. Same auth as search."""
     return _render_template("ask")
+
+
+@app.get("/person-ui/{slug}", response_class=HTMLResponse)
+def person_ui(slug: str):
+    """Person detail page. Same auth as search."""
+    return _render_template("person")
+
+
+@app.get("/company-ui/{slug}", response_class=HTMLResponse)
+def company_ui(slug: str):
+    """Company detail page. Same auth as search."""
+    return _render_template("company")
 
 
 @app.post("/sync")
@@ -842,6 +1188,12 @@ def root():
         "insights_ui": "/insights-ui",
         "chat": "POST /chat",
         "ask_ui": "/ask-ui",
+        "person": "/person/{slug}",
+        "person_ui": "/person-ui/{slug}",
+        "company": "/company/{slug}",
+        "company_ui": "/company-ui/{slug}",
+        "visuals": "/visuals",
+        "related": "/related",
         "sync": "POST /sync",
         "sync_async": "POST /sync/async (202 + job)",
         "process_new_async": "POST /process-new/async (202 + job)",
