@@ -1054,20 +1054,67 @@ def _run_async_job(job_id: str, fn, job_type: str):
     t.start()
 
 
+def _async_202_response(job_id: str, job_type: str) -> JSONResponse:
+    """Return 202 with job_id; minimal response so Railway proxy gets a quick answer."""
+    return JSONResponse(
+        status_code=202,
+        content={"job_id": job_id, "status": "running", "type": job_type, "jobs": f"/jobs/{job_id}"},
+        headers={"Connection": "close", "Cache-Control": "no-store"},
+    )
+
+
 @app.post("/sync/async")
 def sync_async():
     """Like POST /sync but returns 202 Accepted with job_id. Poll GET /jobs/{job_id} for status. Good when sync is slow."""
-    job_id = str(uuid.uuid4())
-    _run_async_job(job_id, _do_sync, "sync")
-    return JSONResponse(status_code=202, content={"job_id": job_id, "status": "running", "jobs": f"/jobs/{job_id}"})
+    try:
+        job_id = str(uuid.uuid4())
+        _run_async_job(job_id, _do_sync, "sync")
+        return _async_202_response(job_id, "sync")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start sync: {e!s}")
 
 
 @app.post("/process-new/async")
 def process_new_async():
     """Like POST /process-new but returns 202 Accepted with job_id. Poll GET /jobs/{job_id} for status."""
-    job_id = str(uuid.uuid4())
-    _run_async_job(job_id, _do_process_new, "process-new")
-    return JSONResponse(status_code=202, content={"job_id": job_id, "status": "running", "jobs": f"/jobs/{job_id}"})
+    try:
+        job_id = str(uuid.uuid4())
+        _run_async_job(job_id, _do_process_new, "process-new")
+        return _async_202_response(job_id, "process-new")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start process-new: {e!s}")
+
+
+def _check_trigger_key() -> bool:
+    """Optional: require SYNC_TRIGGER_KEY for GET trigger endpoints (set in Railway)."""
+    key = (os.environ.get("SYNC_TRIGGER_KEY") or "").strip()
+    return key == "" or key == "skip"  # no key or empty = allow; set key in Railway to require it
+
+
+@app.get("/trigger-sync")
+def trigger_sync_get(key: str | None = None):
+    """GET trigger for sync (cron/n8n). Returns 202 + job_id. Optional: ?key=SYNC_TRIGGER_KEY (set in Railway)."""
+    if os.environ.get("SYNC_TRIGGER_KEY") and (key or "").strip() != os.environ.get("SYNC_TRIGGER_KEY", ""):
+        raise HTTPException(status_code=401, detail="Invalid or missing key")
+    try:
+        job_id = str(uuid.uuid4())
+        _run_async_job(job_id, _do_sync, "sync")
+        return _async_202_response(job_id, "sync")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start sync: {e!s}")
+
+
+@app.get("/trigger-process-new")
+def trigger_process_new_get(key: str | None = None):
+    """GET trigger for process-new (cron/n8n). Returns 202 + job_id. Optional: ?key=SYNC_TRIGGER_KEY."""
+    if os.environ.get("SYNC_TRIGGER_KEY") and (key or "").strip() != os.environ.get("SYNC_TRIGGER_KEY", ""):
+        raise HTTPException(status_code=401, detail="Invalid or missing key")
+    try:
+        job_id = str(uuid.uuid4())
+        _run_async_job(job_id, _do_process_new, "process-new")
+        return _async_202_response(job_id, "process-new")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start process-new: {e!s}")
 
 
 @app.post("/backfill")
@@ -1206,6 +1253,8 @@ def root():
         "sync": "POST /sync",
         "sync_async": "POST /sync/async (202 + job)",
         "process_new_async": "POST /process-new/async (202 + job)",
+        "trigger_sync": "GET /trigger-sync (?key= for cron)",
+        "trigger_process_new": "GET /trigger-process-new (?key= for cron)",
         "seed_links": "POST /seed-links (JSON), POST /seed-links/csv (multipart) — store links in Supabase seed_links",
         "backfill": "POST /backfill (optional multipart CSVs; or none to run from seed_links in DB; 202 + job)",
         "jobs": "GET /jobs/{job_id}",

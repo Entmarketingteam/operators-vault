@@ -21,6 +21,13 @@ Set these in **Railway → your service → Variables**. These are the only plac
 | `DEEPGRAM_API_KEY` | For processing | Transcription (pipeline / process-new). |
 | `ANTHROPIC_API_KEY` | For processing | Insight extraction (pipeline / process-new). |
 | `CORS_ORIGINS` | Optional | Comma-separated origins for `/search` (e.g. your Vercel URL). Default `*` allows any. |
+| `SYNC_TRIGGER_KEY` | Optional | If set, GET `/trigger-sync` and `/trigger-process-new` require `?key=<value>`. Use for cron/n8n so only you can trigger sync. |
+
+**Sync / process (use async or GET trigger to avoid 502 on Railway):**
+- **POST /sync/async** – Start full sync (fetch-new + process-new) in background; returns 202 + `job_id`. Poll **GET /jobs/{job_id}** for status.
+- **POST /process-new/async** – Start processing all unprocessed videos; returns 202 + `job_id`.
+- **GET /trigger-sync** – Same as POST /sync/async but GET (for cron/n8n). Optional: `?key=SYNC_TRIGGER_KEY`.
+- **GET /trigger-process-new** – Same as POST /process-new/async but GET. Optional: `?key=SYNC_TRIGGER_KEY`.
 
 **Quick checks:**  
 - `GET /health` – reports database, youtube, deepgram, anthropic.  

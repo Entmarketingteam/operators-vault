@@ -23,12 +23,41 @@ def main() -> int:
     print("Triggering sync (fetch-new + process-all)...")
     print(f"API: {api_url}")
     
-    # Try async sync first, fall back to separate calls
+    # Prefer GET /trigger-sync (returns 202 quickly; avoids Railway 502)
     try:
         with httpx.Client(timeout=30.0, verify=False) as client:
-            # Try async sync
+            # Prefer GET trigger (Railway-friendly)
+            r = client.get(f"{api_url}/trigger-sync", timeout=15.0)
+            if r.status_code == 401:
+                print("[ERROR] Set SYNC_TRIGGER_KEY in Railway and pass ?key=... or leave unset to allow no key.")
+                return 1
+            if r.status_code == 202:
+                job_data = r.json()
+                job_id = job_data.get("job_id")
+                print(f"\n[OK] Sync started! Job ID: {job_id}")
+                print(f"Status: {job_data.get('status')}")
+                print(f"\nMonitor: GET {api_url}/jobs/{job_id}")
+                print(f"Stats:   GET {api_url}/stats")
+                for _ in range(5):
+                    time.sleep(5)
+                    try:
+                        status_r = client.get(f"{api_url}/jobs/{job_id}", timeout=10.0)
+                        if status_r.status_code == 200:
+                            d = status_r.json()
+                            print(f"  Status: {d.get('status')}")
+                            if d.get("status") == "done":
+                                res = d.get("result", {})
+                                print(f"\n[SUCCESS] Upserted: {res.get('upserted', 0)}, Processed: {res.get('processed', 0)}")
+                                return 0
+                            if d.get("status") == "error":
+                                print(f"\n[ERROR] {d.get('error')}")
+                                return 1
+                    except Exception as e:
+                        print(f"  Poll error: {e}")
+                return 0
+            # Fallback: POST /sync/async
             try:
-                r = client.post(f"{api_url}/sync/async", timeout=10.0)
+                r = client.post(f"{api_url}/sync/async", timeout=15.0)
             except Exception:
                 r = None
             
