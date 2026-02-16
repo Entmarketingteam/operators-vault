@@ -217,11 +217,19 @@ def _do_sync() -> dict:
     cur.close()
     conn.close()
     processed = []
+    errors = []
     for vid, pod in rows:
-        ok = _process_one(vid, pod)
-        if ok:
-            processed.append(vid)
-    return {"ok": True, "upserted": upserted, "processed": len(processed), "video_ids": processed}
+        try:
+            ok = _process_one(vid, pod)
+            if ok:
+                processed.append(vid)
+        except Exception as e:
+            err_msg = f"{vid} ({pod}): {type(e).__name__}: {e!s}"
+            print(f"  [ERROR] Processing failed: {err_msg}", flush=True)
+            errors.append(err_msg)
+    if errors:
+        print(f"  [WARNING] {len(errors)} videos failed to process. First error: {errors[0]}", flush=True)
+    return {"ok": True, "upserted": upserted, "processed": len(processed), "video_ids": processed, "errors": errors[:5]}
 
 
 def _do_process_new() -> dict:
@@ -236,11 +244,19 @@ def _do_process_new() -> dict:
     cur.close()
     conn.close()
     processed = []
+    errors = []
     for vid, pod in rows:
-        ok = _process_one(vid, pod)
-        if ok:
-            processed.append(vid)
-    return {"ok": True, "processed": len(processed), "video_ids": processed}
+        try:
+            ok = _process_one(vid, pod)
+            if ok:
+                processed.append(vid)
+        except Exception as e:
+            err_msg = f"{vid} ({pod}): {type(e).__name__}: {e!s}"
+            print(f"  [ERROR] Processing failed: {err_msg}", flush=True)
+            errors.append(err_msg)
+    if errors:
+        print(f"  [WARNING] {len(errors)} videos failed to process. First error: {errors[0]}", flush=True)
+    return {"ok": True, "processed": len(processed), "video_ids": processed, "errors": errors[:5]}
 
 
 @app.post("/fetch-new")
