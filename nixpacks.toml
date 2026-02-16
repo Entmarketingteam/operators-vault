@@ -1,2 +1,3 @@
+# Keep default packages (e.g. python3) and add ffmpeg; without "..." only ffmpeg was installed and "python" was missing
 [phases.setup]
-nixPkgs = ["ffmpeg"]
+nixPkgs = ["...", "ffmpeg"]
