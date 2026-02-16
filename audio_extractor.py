@@ -120,12 +120,17 @@ def download_audio(video_id: str, work_dir: str | Path | None = None, max_retrie
             stdout = (e.stdout or "").strip() if e.stdout else ""
             # Combine both outputs for better error visibility
             combined = (stderr + "\n" + stdout).strip() if stderr and stdout else (stderr or stdout or "")
-            # Extract meaningful error lines
-            error_lines = [line.strip() for line in combined.split("\n") if line.strip() and not line.strip().startswith("[")]
-            if error_lines:
-                first_error = error_lines[0][:300]
-            else:
-                first_error = f"exit code {e.returncode}"
+            # Always print raw output for Railway logs (yt-dlp errors often start with [youtube], [download])
+            print(f"  [audio] FULL STDERR: {stderr[:1000]}", file=sys.stderr, flush=True)
+            print(f"  [audio] FULL STDOUT: {stdout[:1000]}", file=sys.stderr, flush=True)
+            # Extract meaningful error lines — do NOT filter out [ lines (yt-dlp uses [youtube] ERROR: ...)
+            error_lines = [line.strip() for line in combined.split("\n") if line.strip()]
+            important_lines = [l for l in error_lines if "ERROR" in l.upper() or "error" in l.lower()]
+            if not important_lines:
+                important_lines = [l for l in error_lines if not l.startswith("[download]") and not l.startswith("[info]")]
+            if not important_lines:
+                important_lines = error_lines
+            first_error = important_lines[0][:300] if important_lines else f"exit code {e.returncode}"
             err = f"exit {e.returncode}: {first_error}"
             last_error = err
             
