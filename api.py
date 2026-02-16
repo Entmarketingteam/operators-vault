@@ -278,6 +278,35 @@ def process_new():
     return _do_process_new()
 
 
+@app.post("/run-migrate-phase1")
+def run_migrate_phase1():
+    """Run sql/migrate_phase1_youtube_titans.sql (add view_count, thumbnail_url, etc.). Safe to call multiple times."""
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    path = _root / "sql" / "migrate_phase1_youtube_titans.sql"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Migration file not found")
+    sql = path.read_text(encoding="utf-8")
+    import psycopg2
+    statements = [
+        s.strip() for s in sql.split(";")
+        if s.strip() and not s.strip().startswith("--")
+    ]
+    try:
+        conn = psycopg2.connect(db_url)
+        conn.autocommit = True
+        cur = conn.cursor()
+        for stmt in statements:
+            if stmt:
+                cur.execute(stmt + ";" if not stmt.rstrip().endswith(";") else stmt)
+        cur.close()
+        conn.close()
+        return {"ok": True, "message": "Phase 1 migration applied."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Migration failed: {e!s}")
+
+
 @app.get("/health")
 def health():
     """Check env and connectivity: database, youtube, deepgram, anthropic. Search is Postgres FTS (no Meilisearch)."""
