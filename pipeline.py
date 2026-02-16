@@ -287,7 +287,8 @@ def _process_one(
     print(f"  [audio] {video_id}", flush=True)
     path, err = download_audio(video_id, work_dir)
     if not path:
-        print(f"  [audio] download failed: {err}", flush=True)
+        err_msg = err or "unknown error"
+        print(f"  [audio] download failed: {err_msg}", flush=True)
         return False
 
     # 3) Transcribe
