@@ -1,5 +1,7 @@
 """
-Complete fix for cron service - updates both TRIGGER_URL and start command.
+Find the existing vault-sync-cron service in the project, then set TRIGGER_URL
+and cron command so it works. Use when the cron service exists but you don't
+see it or it's misconfigured.
 """
 from __future__ import annotations
 
@@ -23,12 +25,10 @@ except ImportError:
                     os.environ.setdefault(k.strip(), v.strip())
 
 RAILWAY_GRAPHQL = "https://backboard.railway.com/graphql/v2"
-CRON_SERVICE_ID = "21ebfe00-499d-4865-afef-37a0ebce317c"  # vault-sync-cron (recreated)
 CRON_SCHEDULE = "0 */3 * * *"
 
 
 def _load_railway_ids() -> tuple[str, str] | None:
-    """Returns (project_id, environment_id)."""
     p = os.environ.get("RAILWAY_PROJECT_ID")
     e = os.environ.get("RAILWAY_ENVIRONMENT_ID")
     if p and e:
@@ -49,7 +49,7 @@ def _load_railway_ids() -> tuple[str, str] | None:
 def main() -> int:
     token = os.environ.get("RAILWAY_API_TOKEN", "").strip()
     if not token:
-        print("RAILWAY_API_TOKEN required.", file=sys.stderr)
+        print("RAILWAY_API_TOKEN required", file=sys.stderr)
         return 1
 
     ids = _load_railway_ids()
@@ -58,13 +58,6 @@ def main() -> int:
         return 1
 
     project_id, environment_id = ids
-    
-    # Use POST /sync/async (more reliable)
-    trigger_url = f"{os.environ.get('RAILWAY_APP_URL', 'https://superb-smile-production.up.railway.app').rstrip('/')}/sync/async"
-    
-    print(f"Fixing cron service: {CRON_SERVICE_ID}")
-    print(f"Setting TRIGGER_URL: {trigger_url}")
-    print(f"Setting start command: curl -sS -X POST \"$TRIGGER_URL\"")
 
     try:
         import httpx
@@ -74,8 +67,59 @@ def main() -> int:
 
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
-    # 1. Update TRIGGER_URL variable
-    print("\n1. Updating TRIGGER_URL variable...")
+    # List services in project to find vault-sync-cron
+    r = httpx.post(
+        RAILWAY_GRAPHQL,
+        json={
+            "query": """
+            query project($id: String!) {
+              project(id: $id) {
+                name
+                services {
+                  edges {
+                    node {
+                      id
+                      name
+                    }
+                  }
+                }
+              }
+            }
+            """,
+            "variables": {"id": project_id},
+        },
+        headers=headers,
+        timeout=30,
+    )
+    if r.status_code != 200:
+        print(f"HTTP {r.status_code}: {r.text}", file=sys.stderr)
+        return 1
+    data = r.json()
+    if data.get("errors"):
+        print(f"GraphQL errors: {data['errors']}", file=sys.stderr)
+        return 1
+
+    edges = (data.get("data") or {}).get("project") or {}
+    edges = (edges.get("services") or {}).get("edges") or []
+    cron_id = None
+    for edge in edges:
+        node = edge.get("node") or {}
+        if (node.get("name") or "").strip() == "vault-sync-cron":
+            cron_id = (node.get("id") or "").strip()
+            break
+
+    if not cron_id:
+        print("No service named 'vault-sync-cron' found in this project.", file=sys.stderr)
+        print("Create it with: python scripts/create_railway_cron_service.py", file=sys.stderr)
+        return 1
+
+    print(f"Found vault-sync-cron: {cron_id}")
+    trigger_url = os.environ.get("RAILWAY_APP_URL", "https://superb-smile-production.up.railway.app").rstrip("/") + "/sync/async"
+    # Use literal URL in start command so cron works even if TRIGGER_URL env isn't injected at runtime
+    start_cmd = f'curl -sS -X POST "{trigger_url}"'
+    print(f"Setting start command (literal URL): {start_cmd}")
+
+    # 1. Set TRIGGER_URL variable anyway (for reference)
     r1 = httpx.post(
         RAILWAY_GRAPHQL,
         json={
@@ -88,23 +132,20 @@ def main() -> int:
                 "input": {
                     "projectId": project_id,
                     "environmentId": environment_id,
-                    "serviceId": CRON_SERVICE_ID,
+                    "serviceId": cron_id,
                     "variables": {"TRIGGER_URL": trigger_url},
                 }
             },
         },
         headers=headers,
-        timeout=30.0,
-        verify=False,  # Corporate proxy SSL issues
+        timeout=30,
     )
-    if r1.status_code == 200 and not (r1.json().get("errors")):
-        print("   [OK] TRIGGER_URL updated")
+    if r1.status_code != 200 or r1.json().get("errors"):
+        print(f"Warning: TRIGGER_URL variable: {r1.text}", file=sys.stderr)
     else:
-        print(f"   [ERROR] Failed to update TRIGGER_URL: {r1.text}", file=sys.stderr)
-        return 1
+        print("  TRIGGER_URL variable set.")
 
-    # 2. Update start command and cron schedule
-    print("\n2. Updating start command and cron schedule...")
+    # 2. Set start command (literal URL) and cron schedule - no $TRIGGER_URL dependency
     r2 = httpx.post(
         RAILWAY_GRAPHQL,
         json={
@@ -114,36 +155,25 @@ def main() -> int:
             }
             """,
             "variables": {
-                "serviceId": CRON_SERVICE_ID,
+                "serviceId": cron_id,
                 "environmentId": environment_id,
                 "input": {
-                    "startCommand": "curl -sS -X POST \"$TRIGGER_URL\"",
+                    "startCommand": start_cmd,
                     "cronSchedule": CRON_SCHEDULE,
-                }
+                },
             },
         },
         headers=headers,
-        timeout=30.0,
-        verify=False,
+        timeout=30,
     )
-    if r2.status_code == 200:
-        j = r2.json()
-        if j.get("errors"):
-            print(f"   [ERROR] GraphQL errors: {j['errors']}", file=sys.stderr)
-            return 1
-        else:
-            print("   [OK] Start command and cron schedule updated")
-    else:
-        print(f"   [ERROR] HTTP {r2.status_code}: {r2.text}", file=sys.stderr)
+    if r2.status_code != 200 or r2.json().get("errors"):
+        print(f"Failed to set start command/cron: {r2.text}", file=sys.stderr)
         return 1
+    print(f"  Start command and cron schedule ({CRON_SCHEDULE}) set.")
 
-    print("\n[SUCCESS] Cron service fully configured!")
-    print(f"  - TRIGGER_URL: {trigger_url}")
-    print(f"  - Start command: curl -sS -X POST \"$TRIGGER_URL\"")
-    print(f"  - Schedule: {CRON_SCHEDULE} (every 3 hours)")
-    print("\nNext cron run will execute automatically, or trigger manually:")
-    print(f"  curl -X POST {trigger_url}")
-    
+    print("\nCron is configured. Update scripts with this ID if needed:")
+    print(f"  CRON_SERVICE_ID = \"{cron_id}\"")
+    print("Check Railway Dashboard -> operators-vault project -> vault-sync-cron (it's a separate service, not inside superb-smile).")
     return 0
 
 

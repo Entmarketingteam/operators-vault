@@ -7,8 +7,12 @@ For Railway: uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000}
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import os
+import sys
 import threading
+import traceback
 import uuid
 from pathlib import Path
 
@@ -1086,24 +1090,39 @@ def sync():
 
 
 def _run_async_job(job_id: str, fn, job_type: str):
-    """Run fn() in a background thread; store result or error in _jobs[job_id]."""
+    """Run fn() in a background thread; store result or error in _jobs[job_id], including captured logs."""
     def run():
+        buf_out = io.StringIO()
+        buf_err = io.StringIO()
         try:
-            out = fn()
+            with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
+                out = fn()
             with _jobs_lock:
                 _jobs[job_id]["status"] = "done"
                 _jobs[job_id]["result"] = out
+                _jobs[job_id]["logs"] = {
+                    "stdout": buf_out.getvalue()[-8000:],
+                    "stderr": buf_err.getvalue()[-8000:],
+                }
         except HTTPException as e:
             with _jobs_lock:
                 _jobs[job_id]["status"] = "error"
                 _jobs[job_id]["error"] = f"{e.status_code}: {e.detail}"
+                _jobs[job_id]["logs"] = {
+                    "stdout": buf_out.getvalue()[-8000:],
+                    "stderr": (buf_err.getvalue() + "\n" + traceback.format_exc())[-8000:],
+                }
         except Exception as e:
             with _jobs_lock:
                 _jobs[job_id]["status"] = "error"
                 _jobs[job_id]["error"] = str(e)
+                _jobs[job_id]["logs"] = {
+                    "stdout": buf_out.getvalue()[-8000:],
+                    "stderr": (buf_err.getvalue() + "\n" + traceback.format_exc())[-8000:],
+                }
 
     with _jobs_lock:
-        _jobs[job_id] = {"status": "running", "type": job_type, "result": None, "error": None}
+        _jobs[job_id] = {"status": "running", "type": job_type, "result": None, "error": None, "logs": None}
     t = threading.Thread(target=run, daemon=True)
     t.start()
 
@@ -1117,10 +1136,22 @@ def _async_202_response(job_id: str, job_type: str) -> JSONResponse:
     )
 
 
+def _running_sync_job_id() -> str | None:
+    """If a sync job is already running, return its job_id; else None. Caller must hold _jobs_lock or call from sync endpoint only."""
+    for jid, j in _jobs.items():
+        if j.get("type") == "sync" and j.get("status") == "running":
+            return jid
+    return None
+
+
 @app.post("/sync/async")
 def sync_async():
-    """Like POST /sync but returns 202 Accepted with job_id. Poll GET /jobs/{job_id} for status. Good when sync is slow."""
+    """Like POST /sync but returns 202 Accepted with job_id. Poll GET /jobs/{job_id} for status. Good when sync is slow. Only one sync at a time."""
     try:
+        with _jobs_lock:
+            existing = _running_sync_job_id()
+            if existing is not None:
+                return _async_202_response(existing, "sync")
         job_id = str(uuid.uuid4())
         _run_async_job(job_id, _do_sync, "sync")
         return _async_202_response(job_id, "sync")
@@ -1147,10 +1178,14 @@ def _check_trigger_key() -> bool:
 
 @app.get("/trigger-sync")
 def trigger_sync_get(key: str | None = None):
-    """GET trigger for sync (cron/n8n). Returns 202 + job_id. Optional: ?key=SYNC_TRIGGER_KEY (set in Railway)."""
+    """GET trigger for sync (cron/n8n). Returns 202 + job_id. Optional: ?key=SYNC_TRIGGER_KEY (set in Railway). Only one sync at a time."""
     if os.environ.get("SYNC_TRIGGER_KEY") and (key or "").strip() != os.environ.get("SYNC_TRIGGER_KEY", ""):
         raise HTTPException(status_code=401, detail="Invalid or missing key")
     try:
+        with _jobs_lock:
+            existing = _running_sync_job_id()
+            if existing is not None:
+                return _async_202_response(existing, "sync")
         job_id = str(uuid.uuid4())
         _run_async_job(job_id, _do_sync, "sync")
         return _async_202_response(job_id, "sync")
@@ -1230,6 +1265,8 @@ def get_job(job_id: str):
         out["result"] = j["result"]
     if j.get("error") is not None:
         out["error"] = j["error"]
+    if j.get("logs") is not None:
+        out["logs"] = j["logs"]
     return out
 
 

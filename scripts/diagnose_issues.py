@@ -26,7 +26,7 @@ except ImportError:
                     os.environ.setdefault(k.strip(), v.strip())
 
 RAILWAY_APP_URL = os.environ.get("RAILWAY_APP_URL", "https://superb-smile-production.up.railway.app").rstrip("/")
-CRON_SERVICE_ID = "77f276eb-0792-42bf-80fc-a536e0b1a2a6"
+CRON_SERVICE_ID = "21ebfe00-499d-4865-afef-37a0ebce317c"  # vault-sync-cron
 
 
 def test_cron_service():

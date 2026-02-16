@@ -32,6 +32,10 @@ except ImportError:
                     os.environ.setdefault(k.strip(), v.strip())
 
 
+def _plog(msg: str) -> None:
+    print(msg, file=sys.stderr, flush=True)
+
+
 def _chunk_text(text: str, size: int = 6000, overlap: int = 500) -> list[str]:
     out: list[str] = []
     start = 0
@@ -306,20 +310,19 @@ def _process_one(
         conn.close()
 
     # 2) Audio
-    print(f"  [audio] {video_id}", flush=True)
+    _plog(f"  [audio] {video_id}")
     path, err = download_audio(video_id, work_dir)
     if not path:
-        # Single print line so Railway can't split/drop it - shows err before "download failed"
-        print(f"  [audio] download failed for {video_id}: err={repr(err)}", flush=True)
+        _plog(f"  [audio] download failed for {video_id}: err={repr(err)}")
         return False
 
     # 3) Transcribe
-    print(f"  [transcribe] {video_id}", flush=True)
+    _plog(f"  [transcribe] {video_id}")
     dg = transcribe(path, punctuate=True, utterances=True, diarize=True)
     raw = get_raw_text(dg)
     utterances = get_utterances(dg)
     if not raw:
-        print("  [transcribe] empty", flush=True)
+        _plog("  [transcribe] empty")
         return False
 
     timestamped = _format_timestamped(utterances) if utterances else raw
@@ -349,7 +352,7 @@ def _process_one(
     chunks = _chunk_text(raw, size=6000, overlap=500)
     all_insights: list[dict] = []
     for i, ch in enumerate(chunks):
-        print(f"  [insights] chunk {i+1}/{len(chunks)}", flush=True)
+        _plog(f"  [insights] chunk {i+1}/{len(chunks)}")
         items = extract_insights(ch, prompt_set=prompt_set)
         for it in items:
             it["_chunk"] = ch
@@ -436,7 +439,7 @@ def _process_one(
         cur.close()
         conn.close()
 
-    print(f"  [done] {video_id} insights={len(all_insights)}", flush=True)
+    _plog(f"  [done] {video_id} insights={len(all_insights)}")
     return True
 
 

@@ -27,7 +27,7 @@ except ImportError:
 
 RAILWAY_GRAPHQL = "https://backboard.railway.com/graphql/v2"
 CRON_SCHEDULE = "0 */3 * * *"  # Every 3 hours
-TRIGGER_URL_DEFAULT = "https://superb-smile-production.up.railway.app/trigger-sync"
+TRIGGER_URL_DEFAULT = "https://superb-smile-production.up.railway.app/sync/async"
 
 
 def _load_railway_ids() -> tuple[str, str, str | None] | None:
@@ -63,7 +63,7 @@ def main() -> int:
         return 1
 
     project_id, environment_id, main_service_id = ids
-    trigger_url = os.environ.get("RAILWAY_APP_URL", "https://superb-smile-production.up.railway.app").rstrip("/") + "/trigger-sync"
+    trigger_url = os.environ.get("RAILWAY_APP_URL", "https://superb-smile-production.up.railway.app").rstrip("/") + "/sync/async"
     
     # Try to get SYNC_TRIGGER_KEY from Railway main service variables
     sync_key = os.environ.get("SYNC_TRIGGER_KEY", "").strip()
@@ -108,7 +108,7 @@ def main() -> int:
     if sync_key:
         trigger_url += f"?key={sync_key}"
     else:
-        print("Warning: SYNC_TRIGGER_KEY not found. Cron will call /trigger-sync without key.", file=sys.stderr)
+        print("Warning: SYNC_TRIGGER_KEY not found. Cron will call /sync/async without key.", file=sys.stderr)
         print("If your Railway service requires SYNC_TRIGGER_KEY, set it in .env and rerun this script.", file=sys.stderr)
 
     try:
@@ -223,7 +223,7 @@ def main() -> int:
         else:
             print(f"Cron schedule set to: {CRON_SCHEDULE} (every 3 hours)")
 
-    print("Done. Cron service will call trigger-sync every 3 hours.")
+    print("Done. Cron service will call POST /sync/async every 3 hours.")
     print("Check Railway Dashboard -> vault-sync-cron -> Logs after the first run.")
     return 0
 

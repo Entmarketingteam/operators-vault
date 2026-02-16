@@ -4,13 +4,19 @@ Download audio from YouTube via yt-dlp. Reusable as-is for Operators Vault.
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import sys
 import tempfile
 import time
+import uuid
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+
+def _alog(msg: str) -> None:
+    print(msg, file=sys.stderr, flush=True)
 
 
 def get_audio_path(video_id: str, work_dir: str | Path | None = None) -> Path:
@@ -30,19 +36,23 @@ def download_audio(video_id: str, work_dir: str | Path | None = None, max_retrie
     Download audio for a YouTube video. Uses yt-dlp.
     Returns (path_to_audio_file, "") on success, or (None, error_message) on failure.
     error_message is a short one-line hint for logs (e.g. yt-dlp stderr).
+    Uses a unique subdir per call so concurrent downloads (e.g. two syncs) don't clobber each other.
     
     Args:
         video_id: YouTube video ID
         work_dir: Directory to save audio file
         max_retries: Number of retry attempts for transient failures (default: 2)
     """
-    print(f" [audio] download_audio v2 called for {video_id}", flush=True)
+    _alog(f" [audio] download_audio v2 called for {video_id}")
     work_dir = Path(work_dir or tempfile.gettempdir())
     work_dir.mkdir(parents=True, exist_ok=True)
+    # Unique subdir per call so two syncs downloading the same video don't race on .part -> rename
+    dl_dir = work_dir / f".yt_{uuid.uuid4().hex[:12]}"
+    dl_dir.mkdir(parents=True, exist_ok=True)
     url = f"https://www.youtube.com/watch?v={video_id}"
-    out_tpl = str(work_dir / f"{video_id}.audio.%(ext)s")
+    out_tpl = str(dl_dir / f"{video_id}.audio.%(ext)s")
     
-    # Check if file already exists
+    # Check if file already exists in shared work_dir (reuse from a previous run)
     for ext in (".webm", ".m4a", ".mp3"):
         p = work_dir / f"{video_id}.audio{ext}"
         if p.exists():
@@ -58,22 +68,24 @@ def download_audio(video_id: str, work_dir: str | Path | None = None, max_retrie
     else:
         yt_dlp_cmd = [yt_dlp_cmd]
     
+    proxy_url = os.environ.get("YT_DLP_PROXY", "").strip()
+    proxy_args = ["--proxy", proxy_url] if proxy_url else []
+
     cmd = yt_dlp_cmd + [
+        "-v",
         "-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
         "--extract-audio",
-        "--audio-format", "m4a",  # Use m4a (supported by yt-dlp); Deepgram accepts m4a
+        "--audio-format", "m4a",
         "-o", out_tpl,
         "--no-playlist",
         "--no-warnings",
-        # Removed --quiet to capture error messages
-        url,
-    ]
+    ] + proxy_args + [url]
     
     last_error = None
     for attempt in range(max_retries + 1):
         if attempt > 0:
             wait_time = min(2 ** attempt, 10)  # Exponential backoff: 2s, 4s, max 10s
-            print(f"  [audio] Retry {attempt}/{max_retries} after {wait_time}s...", flush=True)
+            _alog(f"  [audio] Retry {attempt}/{max_retries} after {wait_time}s...")
             time.sleep(wait_time)
         
         try:
@@ -88,23 +100,23 @@ def download_audio(video_id: str, work_dir: str | Path | None = None, max_retrie
             if result.stdout:
                 log.debug("yt-dlp stdout for %s: %s", video_id, result.stdout[:200])
             
-            # Check if file was created
+            # Check if file was created (in our unique dl_dir)
             for ext in (".webm", ".m4a", ".mp3"):
-                p = work_dir / f"{video_id}.audio{ext}"
+                p = dl_dir / f"{video_id}.audio{ext}"
                 if p.exists():
                     return (p, "")
             
             # If we get here, yt-dlp succeeded but no file was created
             err = "no output file written after yt-dlp succeeded"
             last_error = err
-            print(f"  [audio] ERROR: {err}", flush=True)
+            _alog(f"  [audio] ERROR: {err}")
             # Don't retry if yt-dlp succeeded but no file - this is likely a configuration issue
             return (None, err)
             
         except FileNotFoundError as e:
             err = f"yt-dlp or ffmpeg not found: {e}"
             log.warning("%s", err)
-            print(f"  [audio] ERROR: {err}", flush=True)
+            _alog(f"  [audio] ERROR: {err}")
             return (None, err)  # Don't retry - this is a system configuration issue
             
         except subprocess.TimeoutExpired:
@@ -113,22 +125,17 @@ def download_audio(video_id: str, work_dir: str | Path | None = None, max_retrie
             last_error = err
             if attempt < max_retries:
                 continue  # Retry timeout errors
-            print(f"  [audio] ERROR: {err}", flush=True)
+            _alog(f"  [audio] ERROR: {err}")
             return (None, err)
             
         except subprocess.CalledProcessError as e:
             stderr = (e.stderr or "").strip() if e.stderr else ""
             stdout = (e.stdout or "").strip() if e.stdout else ""
+            _alog(f"  [audio] !!! CALLEDPROCESSERROR video_id={video_id} rc={e.returncode}")
+            _alog(f"  [audio] STDERR_REPR: {stderr[:1200]!r}")
+            _alog(f"  [audio] STDOUT_REPR: {stdout[:1200]!r}")
             # Combine both outputs for better error visibility
             combined = (stderr + "\n" + stdout).strip() if stderr and stdout else (stderr or stdout or "")
-            # Always print raw output for Railway logs (yt-dlp errors often start with [youtube], [download])
-            # Print to stdout so it always appears in Railway logs (stderr may be separate/buffered)
-            err_preview = (stderr or "(empty)")[:600]
-            out_preview = (stdout or "(empty)")[:600]
-            print(f"  [audio] FULL STDERR (raw): {err_preview}", flush=True)
-            print(f"  [audio] FULL STDOUT (raw): {out_preview}", flush=True)
-            print(f"  [audio] FULL STDERR: {stderr[:1000]}", file=sys.stderr, flush=True)
-            print(f"  [audio] FULL STDOUT: {stdout[:1000]}", file=sys.stderr, flush=True)
             # Extract meaningful error lines — do NOT filter out [ lines (yt-dlp uses [youtube] ERROR: ...)
             error_lines = [line.strip() for line in combined.split("\n") if line.strip()]
             important_lines = [l for l in error_lines if "ERROR" in l.upper() or "error" in l.lower()]
@@ -152,9 +159,9 @@ def download_audio(video_id: str, work_dir: str | Path | None = None, max_retrie
             
             # Non-retryable error or max retries reached
             log.warning("yt-dlp failed for %s: %s", video_id, err)
-            print(f"  [audio] ERROR: {err}", flush=True)
+            _alog(f"  [audio] ERROR: {err}")
             if combined:
-                print(f"  [audio] yt-dlp output: {combined[:500]}", flush=True)
+                _alog(f"  [audio] yt-dlp output: {combined[:500]}")
             return (None, err)
     
     # Should not reach here, but handle it
