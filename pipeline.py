@@ -289,6 +289,9 @@ def _process_one(
     if not path:
         err_msg = err or "unknown error"
         print(f"  [audio] download failed: {err_msg}", flush=True)
+        # Print to stderr so it's more visible in logs
+        import sys
+        print(f"  [audio] ERROR DETAILS: {err_msg}", file=sys.stderr, flush=True)
         return False
 
     # 3) Transcribe

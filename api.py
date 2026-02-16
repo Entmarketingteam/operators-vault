@@ -223,6 +223,10 @@ def _do_sync() -> dict:
             ok = _process_one(vid, pod)
             if ok:
                 processed.append(vid)
+            else:
+                # _process_one returned False - audio download or processing failed
+                err_msg = f"{vid} ({pod}): Processing failed (check logs for details)"
+                errors.append(err_msg)
         except Exception as e:
             err_msg = f"{vid} ({pod}): {type(e).__name__}: {e!s}"
             print(f"  [ERROR] Processing failed: {err_msg}", flush=True)
