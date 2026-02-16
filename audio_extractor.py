@@ -60,7 +60,7 @@ def download_audio(video_id: str, work_dir: str | Path | None = None, max_retrie
     cmd = yt_dlp_cmd + [
         "-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
         "--extract-audio",
-        "--audio-format", "webm",  # Deepgram likes webm; fallback handled by -f
+        "--audio-format", "m4a",  # Use m4a (supported by yt-dlp); Deepgram accepts m4a
         "-o", out_tpl,
         "--no-playlist",
         "--no-warnings",
