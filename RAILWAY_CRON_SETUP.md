@@ -2,7 +2,38 @@
 
 **Quick setup guide to automatically sync new YouTube videos every 3 hours.**
 
-## Step-by-Step Setup
+---
+
+## Option A: One-Click Script (recommended if you have Railway API token)
+
+From the repo root, with `RAILWAY_API_TOKEN` in `.env` or **Doppler** (and after running `railway link` once):
+
+```bash
+python scripts/create_railway_cron_service.py
+```
+
+If the token is in Doppler, use:
+
+```bash
+doppler run -- python scripts/create_railway_cron_service.py
+```
+
+This creates a **vault-sync-cron** service (Docker image `curlimages/curl`), sets `TRIGGER_URL`, and configures cron to run every 3 hours. If the API shape differs, the script prints manual steps.
+
+Optional env: `RAILWAY_APP_URL` (default `https://superb-smile-production.up.railway.app`), `SYNC_TRIGGER_KEY` (appended to URL if set).
+
+---
+
+## Option B: Deploy Cron Runner from Repo
+
+1. **Railway Dashboard** → your project → **New** → **GitHub Repo**
+2. Select this repo; set **Root Directory** to `cron-runner`
+3. Add variable: **TRIGGER_URL** = `https://superb-smile-production.up.railway.app/trigger-sync` (or your app URL + `/trigger-sync`; if you use `SYNC_TRIGGER_KEY`, add `?key=YOUR_KEY`)
+4. Deploy. The `cron-runner/railway.json` sets **Cron Schedule** to `0 */3 * * *` (every 3 hours)
+
+---
+
+## Option C: Manual Cron Job in Dashboard
 
 ### 1. Go to Railway Dashboard
 - Open: https://railway.app
@@ -34,7 +65,7 @@ curl -X GET "https://superb-smile-production.up.railway.app/trigger-sync"
 curl -X GET "https://superb-smile-production.up.railway.app/trigger-sync?key=$SYNC_TRIGGER_KEY"
 ```
 
-### 4. Save and Activate
+### 4. Save and activate (Option C)
 - Click **"Save"** or **"Deploy"**
 - The cron job will start running automatically
 

@@ -38,7 +38,7 @@ Add these in **Doppler Dashboard → your project → config → Secrets**. Name
 | `YOUTUBE_PLAYLIST_TITANS` | Optional (TITANS fetch) | YouTube TITANS playlist ID |
 | `PUBLIC_API_BASE` | Optional (if UI on different host) | e.g. `https://superb-smile-production.up.railway.app` |
 | `CORS_ORIGINS` | Optional | e.g. your Vercel URL(s), or `*` |
-| `RAILWAY_API_TOKEN` | Optional (set_railway_* scripts) | Railway → Account → Tokens |
+| `RAILWAY_API_TOKEN` | Optional (set_railway_* scripts, create_railway_cron_service.py) | Railway → Account → Tokens |
 | `N8N_HOST`, `N8N_API_KEY` | Optional (n8n workflows) | n8n cloud |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Optional (Supabase Google Auth) | Google Cloud OAuth; used with `enable_supabase_auth.py` and the management token above. |
 
