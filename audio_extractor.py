@@ -36,6 +36,7 @@ def download_audio(video_id: str, work_dir: str | Path | None = None, max_retrie
         work_dir: Directory to save audio file
         max_retries: Number of retry attempts for transient failures (default: 2)
     """
+    print(f" [audio] download_audio v2 called for {video_id}", flush=True)
     work_dir = Path(work_dir or tempfile.gettempdir())
     work_dir.mkdir(parents=True, exist_ok=True)
     url = f"https://www.youtube.com/watch?v={video_id}"
@@ -121,6 +122,11 @@ def download_audio(video_id: str, work_dir: str | Path | None = None, max_retrie
             # Combine both outputs for better error visibility
             combined = (stderr + "\n" + stdout).strip() if stderr and stdout else (stderr or stdout or "")
             # Always print raw output for Railway logs (yt-dlp errors often start with [youtube], [download])
+            # Print to stdout so it always appears in Railway logs (stderr may be separate/buffered)
+            err_preview = (stderr or "(empty)")[:600]
+            out_preview = (stdout or "(empty)")[:600]
+            print(f"  [audio] FULL STDERR (raw): {err_preview}", flush=True)
+            print(f"  [audio] FULL STDOUT (raw): {out_preview}", flush=True)
             print(f"  [audio] FULL STDERR: {stderr[:1000]}", file=sys.stderr, flush=True)
             print(f"  [audio] FULL STDOUT: {stdout[:1000]}", file=sys.stderr, flush=True)
             # Extract meaningful error lines — do NOT filter out [ lines (yt-dlp uses [youtube] ERROR: ...)
