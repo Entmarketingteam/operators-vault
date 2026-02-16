@@ -110,6 +110,7 @@ def _ensure_video(
     except psycopg2.ProgrammingError as e:
         if "does not exist" in str(e) or "column" in str(e).lower():
             # Minimal schema (no view_count, like_count, etc.): upsert only base columns
+            cursor.connection.rollback()
             cursor.execute(
                 """
                 INSERT INTO videos (video_id, podcast, title, duration_seconds, channel_id, published_at)
