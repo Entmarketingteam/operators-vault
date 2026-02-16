@@ -461,10 +461,11 @@ def _list_episodes(podcast: str | None = None, limit: int = 100) -> dict:
     conn = psycopg2.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
+        # Use minimal columns so this works with or without view_count/thumbnail_url
         if podcast:
             cur.execute(
                 """
-                SELECT video_id, title, podcast, duration_seconds, view_count, thumbnail_url, published_at
+                SELECT video_id, title, podcast, duration_seconds, published_at
                 FROM videos
                 WHERE podcast = %s
                 ORDER BY published_at DESC NULLS LAST, created_at DESC
@@ -475,7 +476,7 @@ def _list_episodes(podcast: str | None = None, limit: int = 100) -> dict:
         else:
             cur.execute(
                 """
-                SELECT video_id, title, podcast, duration_seconds, view_count, thumbnail_url, published_at
+                SELECT video_id, title, podcast, duration_seconds, published_at
                 FROM videos
                 ORDER BY published_at DESC NULLS LAST, created_at DESC
                 LIMIT %s
@@ -489,9 +490,9 @@ def _list_episodes(podcast: str | None = None, limit: int = 100) -> dict:
                 "title": r[1] or "",
                 "podcast": r[2],
                 "duration_seconds": r[3],
-                "view_count": r[4],
-                "thumbnail_url": r[5],
-                "published_at": r[6].isoformat() if r[6] else None,
+                "view_count": None,
+                "thumbnail_url": None,
+                "published_at": r[4].isoformat() if r[4] else None,
             }
             for r in rows
         ]

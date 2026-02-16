@@ -78,33 +78,54 @@ def _ensure_video(
     channel_title: str | None = None,
     tags: str | None = None,
 ) -> None:
-    cursor.execute(
-        """
-        INSERT INTO videos (
-            video_id, podcast, title, duration_seconds, channel_id, published_at,
-            view_count, like_count, comment_count, thumbnail_url, description, channel_title, tags
+    import psycopg2
+    try:
+        cursor.execute(
+            """
+            INSERT INTO videos (
+                video_id, podcast, title, duration_seconds, channel_id, published_at,
+                view_count, like_count, comment_count, thumbnail_url, description, channel_title, tags
+            )
+            VALUES (%s, %s, %s, %s, %s, %s::timestamptz, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (video_id) DO UPDATE SET
+              podcast = EXCLUDED.podcast,
+              title = COALESCE(NULLIF(EXCLUDED.title,''), videos.title),
+              duration_seconds = COALESCE(EXCLUDED.duration_seconds, videos.duration_seconds),
+              channel_id = COALESCE(EXCLUDED.channel_id, videos.channel_id),
+              published_at = COALESCE(EXCLUDED.published_at, videos.published_at),
+              view_count = COALESCE(EXCLUDED.view_count, videos.view_count),
+              like_count = COALESCE(EXCLUDED.like_count, videos.like_count),
+              comment_count = COALESCE(EXCLUDED.comment_count, videos.comment_count),
+              thumbnail_url = COALESCE(EXCLUDED.thumbnail_url, videos.thumbnail_url),
+              description = COALESCE(EXCLUDED.description, videos.description),
+              channel_title = COALESCE(EXCLUDED.channel_title, videos.channel_title),
+              tags = COALESCE(EXCLUDED.tags, videos.tags),
+              updated_at = now()
+            """,
+            (
+                video_id, podcast, title or "", duration_seconds, channel_id, published_at,
+                view_count, like_count, comment_count, thumbnail_url, description, channel_title, tags,
+            ),
         )
-        VALUES (%s, %s, %s, %s, %s, %s::timestamptz, %s, %s, %s, %s, %s, %s, %s)
-        ON CONFLICT (video_id) DO UPDATE SET
-          podcast = EXCLUDED.podcast,
-          title = COALESCE(NULLIF(EXCLUDED.title,''), videos.title),
-          duration_seconds = COALESCE(EXCLUDED.duration_seconds, videos.duration_seconds),
-          channel_id = COALESCE(EXCLUDED.channel_id, videos.channel_id),
-          published_at = COALESCE(EXCLUDED.published_at, videos.published_at),
-          view_count = COALESCE(EXCLUDED.view_count, videos.view_count),
-          like_count = COALESCE(EXCLUDED.like_count, videos.like_count),
-          comment_count = COALESCE(EXCLUDED.comment_count, videos.comment_count),
-          thumbnail_url = COALESCE(EXCLUDED.thumbnail_url, videos.thumbnail_url),
-          description = COALESCE(EXCLUDED.description, videos.description),
-          channel_title = COALESCE(EXCLUDED.channel_title, videos.channel_title),
-          tags = COALESCE(EXCLUDED.tags, videos.tags),
-          updated_at = now()
-        """,
-        (
-            video_id, podcast, title or "", duration_seconds, channel_id, published_at,
-            view_count, like_count, comment_count, thumbnail_url, description, channel_title, tags,
-        ),
-    )
+    except psycopg2.ProgrammingError as e:
+        if "does not exist" in str(e) or "column" in str(e).lower():
+            # Minimal schema (no view_count, like_count, etc.): upsert only base columns
+            cursor.execute(
+                """
+                INSERT INTO videos (video_id, podcast, title, duration_seconds, channel_id, published_at)
+                VALUES (%s, %s, %s, %s, %s, %s::timestamptz)
+                ON CONFLICT (video_id) DO UPDATE SET
+                  podcast = EXCLUDED.podcast,
+                  title = COALESCE(NULLIF(EXCLUDED.title,''), videos.title),
+                  duration_seconds = COALESCE(EXCLUDED.duration_seconds, videos.duration_seconds),
+                  channel_id = COALESCE(EXCLUDED.channel_id, videos.channel_id),
+                  published_at = COALESCE(EXCLUDED.published_at, videos.published_at),
+                  updated_at = now()
+                """,
+                (video_id, podcast, title or "", duration_seconds, channel_id, published_at),
+            )
+        else:
+            raise
 
 
 def _seed_csvs(cursor, paths_override: dict[str, str] | None = None) -> int:
