@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -47,8 +48,16 @@ def download_audio(video_id: str, work_dir: str | Path | None = None, max_retrie
             log.debug("Audio file already exists for %s: %s", video_id, p)
             return (p, "")
     
-    cmd = [
-        "yt-dlp",
+    # Try yt-dlp command first, fallback to python -m yt_dlp
+    import shutil
+    yt_dlp_cmd = shutil.which("yt-dlp")
+    if not yt_dlp_cmd:
+        # Fallback to python module
+        yt_dlp_cmd = [sys.executable, "-m", "yt_dlp"]
+    else:
+        yt_dlp_cmd = [yt_dlp_cmd]
+    
+    cmd = yt_dlp_cmd + [
         "-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
         "--extract-audio",
         "--audio-format", "webm",  # Deepgram likes webm; fallback handled by -f
