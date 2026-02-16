@@ -37,7 +37,7 @@ from pydantic import BaseModel
 # Import after dotenv
 from pipeline import _fetch_new, _get_unprocessed, _process_one, run_seed_and_process_all, upsert_seed_links
 
-app = FastAPI(title="Operators Vault Pipeline API", version="1.0.0")
+app = FastAPI(title="Operators Vault Pipeline API", version="1.0.1")
 
 # CORS so Vercel (and other) front ends can call /search
 _cors_origins = os.environ.get("CORS_ORIGINS", "*").strip()
