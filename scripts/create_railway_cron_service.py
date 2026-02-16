@@ -205,7 +205,7 @@ def main() -> int:
                 "serviceId": service_id,
                 "environmentId": environment_id,
                 "input": {
-                    "startCommand": "curl -sS -X GET \"$TRIGGER_URL\"",
+                    "startCommand": "curl -sS -X POST \"$TRIGGER_URL\"",
                     "cronSchedule": CRON_SCHEDULE,
                 }
             },

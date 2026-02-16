@@ -109,8 +109,8 @@ def main() -> int:
     
     print(f"Found cron service: {cron_service_id}")
     
-    # Build trigger URL
-    trigger_url = os.environ.get("RAILWAY_APP_URL", "https://superb-smile-production.up.railway.app").rstrip("/") + "/trigger-sync"
+    # Build trigger URL - use POST /sync/async (more reliable than GET /trigger-sync)
+    trigger_url = os.environ.get("RAILWAY_APP_URL", "https://superb-smile-production.up.railway.app").rstrip("/") + "/sync/async"
     
     # Try to get SYNC_TRIGGER_KEY from Railway main service variables
     sync_key = os.environ.get("SYNC_TRIGGER_KEY", "").strip()
