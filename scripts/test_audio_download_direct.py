@@ -48,7 +48,7 @@ def main():
         sys.executable, "-m", "yt_dlp",
         "-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
         "--extract-audio",
-        "--audio-format", "webm",
+        "--audio-format", "m4a",
         "-o", out_tpl,
         "--no-playlist",
         "--no-warnings",
