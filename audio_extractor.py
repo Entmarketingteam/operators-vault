@@ -64,10 +64,17 @@ def download_audio(video_id: str, work_dir: str | Path | None = None, max_retrie
         "-o", out_tpl,
         "--no-playlist",
         "--no-warnings",
-        # Removed --quiet to capture error messages
+        # TEST BRANCH: iOS client + mobile UA to try bypassing YouTube blocks (zero cost)
+        "--extractor-args", "youtube:player_client=ios,web",
+        "--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
         url,
     ]
-    
+    # Optional proxy fallback if set (e.g. residential); insert before url
+    proxy_url = os.environ.get("YT_DLP_PROXY")
+    if proxy_url:
+        cmd.insert(-1, proxy_url)
+        cmd.insert(-1, "--proxy")
+
     last_error = None
     for attempt in range(max_retries + 1):
         if attempt > 0:
