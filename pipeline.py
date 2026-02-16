@@ -287,11 +287,13 @@ def _process_one(
     print(f"  [audio] {video_id}", flush=True)
     path, err = download_audio(video_id, work_dir)
     if not path:
-        err_msg = err or "unknown error"
+        err_msg = err or "unknown error (no error message returned)"
         print(f"  [audio] download failed: {err_msg}", flush=True)
         # Print to stderr so it's more visible in logs
         import sys
         print(f"  [audio] ERROR DETAILS: {err_msg}", file=sys.stderr, flush=True)
+        # Also print the error type for debugging
+        print(f"  [audio] ERROR TYPE: {type(err).__name__}, VALUE: {repr(err)}", file=sys.stderr, flush=True)
         return False
 
     # 3) Transcribe
