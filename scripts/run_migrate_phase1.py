@@ -44,13 +44,14 @@ def main() -> int:
         s.strip() for s in sql.split(";")
         if s.strip() and not s.strip().startswith("--")
     ]
+    # Only run DDL (e.g. ALTER TABLE); skip comment fragments that contained ";"
+    statements = [s for s in statements if s.upper().startswith("ALTER TABLE")]
     try:
         conn = psycopg2.connect(db_url)
         conn.autocommit = True
         cur = conn.cursor()
         for stmt in statements:
-            if stmt:
-                cur.execute(stmt + ";" if not stmt.rstrip().endswith(";") else stmt)
+            cur.execute(stmt + ";" if not stmt.rstrip().endswith(";") else stmt)
         cur.close()
         conn.close()
         print("Phase 1 migration (YouTube stats + TITANS) applied successfully.")
