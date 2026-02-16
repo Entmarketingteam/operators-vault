@@ -10,5 +10,4 @@ ALTER TABLE videos ADD COLUMN IF NOT EXISTS description TEXT;
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS channel_title TEXT;
 ALTER TABLE videos ADD COLUMN IF NOT EXISTS tags TEXT;
 
--- Comment: podcast allowed values include 'titans' (TITANS series)
--- No enum constraint; application uses 9operators | marketing_operator | finance_operators | titans
+-- Podcast values: 9operators, marketing_operator, finance_operators, titans (no enum constraint)
