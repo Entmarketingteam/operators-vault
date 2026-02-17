@@ -48,6 +48,7 @@ from structured_logger import get_logger, log_job_event
 _log = get_logger("api")
 
 # Import after dotenv
+from deepgram_client import DeepgramAuthError, check_api_key
 from pipeline import _fetch_new, _get_unprocessed, _process_one, run_seed_and_process_all, upsert_seed_links
 
 app = FastAPI(title="Operators Vault Pipeline API", version="2.0.0")
@@ -275,6 +276,14 @@ def _do_sync(job_id: str | None = None) -> dict:
         raise HTTPException(status_code=500, detail="DATABASE_URL not set")
     if not os.environ.get("YOUTUBE_API_KEY"):
         raise HTTPException(status_code=500, detail="YOUTUBE_API_KEY not set")
+
+    # Pre-flight: validate Deepgram API key before downloading any audio
+    try:
+        check_api_key()
+    except DeepgramAuthError as e:
+        _log.error("Sync aborted: Deepgram API key invalid — %s", e)
+        raise HTTPException(status_code=500, detail=f"Deepgram API key is invalid: {e}")
+
     import psycopg2
     _log.info("Sync starting: fetch-new phase")
     if job_id:
@@ -306,6 +315,11 @@ def _do_sync(job_id: str | None = None) -> dict:
                 print(f"  [WARNING] Processing failed for {vid} ({pod})", flush=True)
                 errors.append(err_msg)
                 _log.warning("Processing failed for %s (%s)", vid, pod)
+        except DeepgramAuthError as e:
+            err_msg = f"FATAL: Deepgram API key invalid — aborting remaining {len(rows) - i - 1} videos. {e}"
+            _log.error(err_msg)
+            errors.append(err_msg)
+            break
         except Exception as e:
             err_msg = f"{vid} ({pod}): {type(e).__name__}: {e!s}"
             _log.error("Processing exception for %s: %s", vid, err_msg)
@@ -324,6 +338,14 @@ def _do_process_new(job_id: str | None = None) -> dict:
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         raise HTTPException(status_code=500, detail="DATABASE_URL not set")
+
+    # Pre-flight: validate Deepgram API key before downloading any audio
+    try:
+        check_api_key()
+    except DeepgramAuthError as e:
+        _log.error("process-new aborted: Deepgram API key invalid — %s", e)
+        raise HTTPException(status_code=500, detail=f"Deepgram API key is invalid: {e}")
+
     import psycopg2
     conn = psycopg2.connect(db_url)
     cur = conn.cursor()
@@ -350,6 +372,11 @@ def _do_process_new(job_id: str | None = None) -> dict:
                 print(f"  [WARNING] Processing failed for {vid} ({pod})", flush=True)
                 errors.append(err_msg)
                 _log.warning("Processing failed for %s (%s)", vid, pod)
+        except DeepgramAuthError as e:
+            err_msg = f"FATAL: Deepgram API key invalid — aborting remaining {len(rows) - i - 1} videos. {e}"
+            _log.error(err_msg)
+            errors.append(err_msg)
+            break
         except Exception as e:
             err_msg = f"{vid} ({pod}): {type(e).__name__}: {e!s}"
             _log.error("Processing exception for %s: %s", vid, err_msg)
@@ -431,7 +458,17 @@ def health():
             checks["youtube"] = "ok"
         except ImportError:
             checks["youtube"] = "error: google-api-python-client not installed"
-    checks["deepgram"] = "ok" if os.environ.get("DEEPGRAM_API_KEY") else "missing"
+    dg_key = os.environ.get("DEEPGRAM_API_KEY")
+    if not dg_key:
+        checks["deepgram"] = "missing"
+    else:
+        try:
+            check_api_key(dg_key)
+            checks["deepgram"] = "ok"
+        except DeepgramAuthError:
+            checks["deepgram"] = "error: invalid API key (401)"
+        except Exception as e:
+            checks["deepgram"] = f"error: {e!s}"
     checks["anthropic"] = "ok" if os.environ.get("ANTHROPIC_API_KEY") else "missing"
     checks["search"] = "postgres"
 
