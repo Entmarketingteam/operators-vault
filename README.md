@@ -100,6 +100,8 @@ uvicorn api:app --host 0.0.0.0 --port 8000
 - **Vercel** can host the static front end in `web/` (root directory set to `web`). The nav in `web/index.html` links to the Railway API for Discover, Listen, Catalog, People, Ask, and API docs. Push to the same repo to update both; Vercel redeploys when the repo is connected.
 - **GitHub:** Repo is the single source. No secrets in the repo; use Railway and Vercel env (or Doppler for local). After pushing, confirm Railway deploy and, if using Vercel, that the build succeeds.
 
+**Keeping local and GitHub in sync:** Pull before work, commit and push after changes (including agent edits) so the repo stays the single source of truth and debugging stays in Cursor. Quick cloud debug: `POST /process-one/async` with one `video_id`, then `GET /jobs/{job_id}` for `logs.stderr`. See `docs/SYNC_AND_DEBUG_IN_CURSOR.md` and `AUDIO_SYNC_REFERENCE.md`.
+
 ## Project layout
 
 - `PLAN.md` – Plan, status, next steps (handoff)

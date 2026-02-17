@@ -303,11 +303,15 @@ def _do_sync(job_id: str | None = None) -> dict:
                 _log.info("Processed video %s (%s) successfully", vid, pod)
             else:
                 err_msg = f"{vid} ({pod}): Processing failed (check logs for details)"
+                print(f"  [WARNING] Processing failed for {vid} ({pod})", flush=True)
                 errors.append(err_msg)
                 _log.warning("Processing failed for %s (%s)", vid, pod)
         except Exception as e:
             err_msg = f"{vid} ({pod}): {type(e).__name__}: {e!s}"
             _log.error("Processing exception for %s: %s", vid, err_msg)
+            print(f"  [ERROR] Processing failed: {err_msg}", flush=True)
+            import traceback
+            print(f"  [ERROR] Traceback: {traceback.format_exc()}", flush=True)
             errors.append(err_msg)
     if errors:
         _log.warning("%d videos failed to process. First error: %s", len(errors), errors[0])
@@ -343,11 +347,15 @@ def _do_process_new(job_id: str | None = None) -> dict:
                 _log.info("Processed video %s (%s) successfully", vid, pod)
             else:
                 err_msg = f"{vid} ({pod}): Processing failed (check logs for details)"
+                print(f"  [WARNING] Processing failed for {vid} ({pod})", flush=True)
                 errors.append(err_msg)
                 _log.warning("Processing failed for %s (%s)", vid, pod)
         except Exception as e:
             err_msg = f"{vid} ({pod}): {type(e).__name__}: {e!s}"
             _log.error("Processing exception for %s: %s", vid, err_msg)
+            print(f"  [ERROR] Processing failed: {err_msg}", flush=True)
+            import traceback
+            print(f"  [ERROR] Traceback: {traceback.format_exc()}", flush=True)
             errors.append(err_msg)
     if errors:
         _log.warning("%d videos failed to process. First error: %s", len(errors), errors[0])

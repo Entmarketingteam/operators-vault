@@ -1,0 +1,26 @@
+---
+description: Keep local and GitHub in sync; prefer debugging and fixes in Cursor using this repo.
+alwaysApply: true
+---
+
+# Sync and debug in this repo
+
+## Single source of truth
+- **GitHub** is the source of truth. **Local** should match it. **Railway** deploys from GitHub.
+- So: fixes and agent modifications belong in this repo, committed and pushed, so debugging can stay in Cursor.
+
+## When you (the agent) change code
+- After making fixes or feature changes, **commit and push** so the user's local and GitHub stay up to date:
+  - `git add` the relevant files (or `git add -A` if the user asked for "all changes")
+  - `git commit -m "Short, clear message"`
+  - `git push origin master`
+- If the user prefers to commit themselves, say: "When you're ready, commit and push so Railway gets the update and local stays in sync with GitHub."
+
+## When debugging or troubleshooting
+- At the start of a debugging session, suggest or run **`git pull origin master`** so local is up to date with any changes from elsewhere.
+- Prefer **fixing in this repo** and documenting in `AUDIO_SYNC_REFERENCE.md` or `docs/SYNC_AND_DEBUG_IN_CURSOR.md` when the fix affects audio/sync or workflow.
+- For cloud errors (e.g. yt-dlp on Railway): remind the user of the fast loop — **POST /process-one/async** with one `video_id`, then **GET /jobs/{job_id}** for `logs.stderr` — and use that output to decide the next code change here.
+
+## References
+- `AUDIO_SYNC_REFERENCE.md` — audio download and sync behavior, where to look when things break.
+- `docs/SYNC_AND_DEBUG_IN_CURSOR.md` — sync workflow and quick debug commands.

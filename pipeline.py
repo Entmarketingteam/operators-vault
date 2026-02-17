@@ -324,10 +324,13 @@ def _process_one(
     # 3) Transcribe
     _plog(f"  [transcribe] {video_id}")
     dg = transcribe(path, punctuate=True, utterances=True, diarize=True)
+    if dg is None:
+        _plog(f"  [transcribe] failed for {video_id}: transcribe() returned None (check Deepgram API key and logs)")
+        return False
     raw = get_raw_text(dg)
     utterances = get_utterances(dg)
     if not raw:
-        _plog("  [transcribe] empty")
+        _plog(f"  [transcribe] empty transcript for {video_id}: dg keys={list(dg.keys())[:10] if isinstance(dg, dict) else 'not a dict'}")
         return False
 
     timestamped = _format_timestamped(utterances) if utterances else raw
