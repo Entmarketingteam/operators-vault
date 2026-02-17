@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 try:
     from deepgram import DeepgramClient
 except ImportError:
@@ -19,9 +21,57 @@ from structured_logger import get_logger
 _log = get_logger("deepgram_client")
 
 
+class DeepgramAuthError(Exception):
+    """Raised when Deepgram returns 401 / INVALID_AUTH. Callers should abort the batch."""
+    pass
+
+
 def _dlog(msg: str) -> None:
     """Log to stderr so it appears in Railway / job capture."""
     print(msg, file=sys.stderr, flush=True)
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    """Detect 401 / INVALID_AUTH from Deepgram SDK exceptions."""
+    exc_str = str(exc)
+    if "401" in exc_str or "INVALID_AUTH" in exc_str or "Invalid credentials" in exc_str:
+        return True
+    # Check for status_code attribute (Deepgram SDK ApiError)
+    if hasattr(exc, "status_code") and getattr(exc, "status_code", None) == 401:
+        return True
+    return False
+
+
+def check_api_key(api_key: str | None = None) -> bool:
+    """
+    Validate the Deepgram API key via GET /v1/projects.
+    Returns True if valid. Raises DeepgramAuthError if invalid.
+    """
+    api_key = api_key or os.environ.get("DEEPGRAM_API_KEY")
+    if not api_key:
+        raise DeepgramAuthError("DEEPGRAM_API_KEY not set")
+    try:
+        resp = httpx.get(
+            "https://api.deepgram.com/v1/projects",
+            headers={"Authorization": f"Token {api_key}"},
+            timeout=10,
+        )
+        if resp.status_code == 401:
+            _log.error("Deepgram API key invalid (401 from /v1/projects)")
+            raise DeepgramAuthError(
+                f"Deepgram API key is invalid (HTTP 401). "
+                f"Check DEEPGRAM_API_KEY env var. Response: {resp.text[:200]}"
+            )
+        if resp.status_code == 200:
+            _log.info("Deepgram API key validated successfully")
+            return True
+        _log.warning("Deepgram key check returned HTTP %d: %s", resp.status_code, resp.text[:200])
+        return True  # Non-401 errors (e.g. 403 scope) mean the key itself is valid
+    except DeepgramAuthError:
+        raise
+    except Exception as e:
+        _log.warning("Deepgram key check failed (network?): %s", e)
+        return True  # Network errors shouldn't block sync; the real transcribe call will fail
 
 
 def transcribe(
@@ -36,7 +86,8 @@ def transcribe(
     """
     Transcribe audio file via Deepgram SDK v5.
     Returns dict with 'results' (and 'results.utterances' when enabled).
-    Returns None on failure or if deepgram-sdk not installed.
+    Returns None on non-auth failure or if deepgram-sdk not installed.
+    Raises DeepgramAuthError on 401/INVALID_AUTH so callers can abort.
     """
     if DeepgramClient is None:
         _dlog("[deepgram] transcribe: DeepgramClient not available (SDK not installed)")
@@ -46,7 +97,7 @@ def transcribe(
     if not api_key:
         _dlog("[deepgram] transcribe: DEEPGRAM_API_KEY not set")
         _log.warning("DEEPGRAM_API_KEY not set")
-        return None
+        raise DeepgramAuthError("DEEPGRAM_API_KEY not set")
     path = Path(audio_path)
     if not path.exists():
         _dlog(f"[deepgram] transcribe: file not found {path}")
@@ -75,6 +126,11 @@ def transcribe(
     except Exception as e:
         _dlog(f"[deepgram] transcribe exception for {path}: {type(e).__name__}: {e}")
         _log.error("Transcription failed for %s: %s: %s", path.name, type(e).__name__, e)
+        if _is_auth_error(e):
+            raise DeepgramAuthError(
+                f"Deepgram API key is invalid (401 Unauthorized). "
+                f"Update DEEPGRAM_API_KEY env var. Original: {type(e).__name__}: {e}"
+            ) from e
         return None
 
 

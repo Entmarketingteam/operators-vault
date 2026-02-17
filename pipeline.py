@@ -293,7 +293,7 @@ def _process_one(
     import uuid
 
     from audio_extractor import download_audio
-    from deepgram_client import get_raw_text, get_utterances, transcribe
+    from deepgram_client import DeepgramAuthError, get_raw_text, get_utterances, transcribe
     from insight_extractor import (
         extract_insights,
         extract_timestamps,
@@ -321,11 +321,15 @@ def _process_one(
         _plog(f"  [audio] download failed for {video_id}: err={repr(err)}")
         return False
 
-    # 3) Transcribe
+    # 3) Transcribe (DeepgramAuthError propagates to abort the batch)
     _plog(f"  [transcribe] {video_id}")
-    dg = transcribe(path, punctuate=True, utterances=True, diarize=True)
+    try:
+        dg = transcribe(path, punctuate=True, utterances=True, diarize=True)
+    except DeepgramAuthError:
+        _plog(f"  [transcribe] FATAL: Deepgram API key is invalid — aborting")
+        raise
     if dg is None:
-        _plog(f"  [transcribe] failed for {video_id}: transcribe() returned None (check Deepgram API key and logs)")
+        _plog(f"  [transcribe] failed for {video_id}: transcribe() returned None (check Deepgram logs)")
         return False
     raw = get_raw_text(dg)
     utterances = get_utterances(dg)
@@ -493,7 +497,16 @@ def run_seed_and_process_all(
 
     processed = []
     for vid, pod in rows:
-        ok = _process_one(vid, pod, work_dir=work_dir, prompt_set=prompt_set)
+        try:
+            ok = _process_one(vid, pod, work_dir=work_dir, prompt_set=prompt_set)
+        except Exception as e:
+            # Import here to avoid circular dependency at module level
+            from deepgram_client import DeepgramAuthError
+            if isinstance(e, DeepgramAuthError):
+                _log.error("Deepgram auth error — aborting remaining videos: %s", e)
+                break
+            _log.error("Processing failed for %s: %s", vid, e)
+            continue
         if ok:
             processed.append(vid)
     return {"seeded": seeded, "processed": len(processed), "video_ids": processed}
@@ -604,9 +617,14 @@ def main() -> int:
         if not rows:
             print("No unprocessed videos.", flush=True)
             return 0
+        from deepgram_client import DeepgramAuthError
         for i, (vid, pod) in enumerate(rows):
             print(f"[{i+1}/{len(rows)}] {vid} ({pod})", flush=True)
-            _process_one(vid, pod, work_dir=work_dir, prompt_set=args.prompt_set)
+            try:
+                _process_one(vid, pod, work_dir=work_dir, prompt_set=args.prompt_set)
+            except DeepgramAuthError as e:
+                print(f"FATAL: Deepgram API key invalid — aborting. {e}", flush=True)
+                return 1
         return 0
 
     ap.print_help()
