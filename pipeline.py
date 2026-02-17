@@ -31,9 +31,14 @@ except ImportError:
                 if k.strip():
                     os.environ.setdefault(k.strip(), v.strip())
 
+from structured_logger import get_logger
+
+_log = get_logger("pipeline")
+
 
 def _plog(msg: str) -> None:
-    print(msg, file=sys.stderr, flush=True)
+    """Legacy log helper — now delegates to structured logger."""
+    _log.info(msg.strip())
 
 
 def _chunk_text(text: str, size: int = 6000, overlap: int = 500) -> list[str]:
