@@ -1170,6 +1170,22 @@ def process_new_async():
         raise HTTPException(status_code=500, detail=f"Failed to start process-new: {e!s}")
 
 
+@app.post("/process-one/async")
+def process_one_async(req: ProcessRequest):
+    """Process exactly one video asynchronously. Returns 202 + job_id; poll /jobs/{job_id}."""
+    try:
+        job_id = str(uuid.uuid4())
+
+        def run_one():
+            ok = _process_one(req.video_id, req.podcast)
+            return {"ok": bool(ok), "video_id": req.video_id, "podcast": req.podcast}
+
+        _run_async_job(job_id, run_one, "process-one")
+        return _async_202_response(job_id, "process-one")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to start process-one: {e!s}")
+
+
 def _check_trigger_key() -> bool:
     """Optional: require SYNC_TRIGGER_KEY for GET trigger endpoints (set in Railway)."""
     key = (os.environ.get("SYNC_TRIGGER_KEY") or "").strip()
@@ -1344,6 +1360,7 @@ def root():
         "sync": "POST /sync",
         "sync_async": "POST /sync/async (202 + job)",
         "process_new_async": "POST /process-new/async (202 + job)",
+        "process_one_async": "POST /process-one/async (body: video_id, podcast; 202 + job)",
         "trigger_sync": "GET /trigger-sync (?key= for cron)",
         "trigger_process_new": "GET /trigger-process-new (?key= for cron)",
         "seed_links": "POST /seed-links (JSON), POST /seed-links/csv (multipart) — store links in Supabase seed_links",
