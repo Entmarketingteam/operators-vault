@@ -15,7 +15,7 @@ def _slugify(name: str) -> str:
     return s.strip("-")
 
 
-def _anthropic_message(system: str, user: str, model: str = "claude-sonnet-4-20250514") -> str:
+def _anthropic_message(system: str, user: str, model: str = "claude-sonnet-4-5-20250929") -> str:
     try:
         import anthropic
     except ImportError:

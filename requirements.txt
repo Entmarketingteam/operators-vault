@@ -17,7 +17,7 @@ google-api-python-client>=2.111.0
 yt-dlp>=2024.1.0
 
 # Transcription
-deepgram-sdk>=3.0.0
+deepgram-sdk>=5.0.0
 
 # Auth (Supabase JWT for private search)
 PyJWT>=2.8.0
