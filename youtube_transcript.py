@@ -6,10 +6,17 @@ Uses the youtube-transcript-api library which accesses YouTube's caption
 endpoint directly — this works from datacenter IPs where yt-dlp audio
 downloads are blocked by bot detection.
 
+When YouTube also blocks caption requests (common for cloud-provider IPs),
+set the ``YT_DLP_PROXY`` environment variable to a residential/rotating
+proxy URL.  The same variable is shared with yt-dlp so a single config
+covers both audio downloads and caption fetches.
+
 Returns data in the same shape as Deepgram so the pipeline can use it
 transparently.
 """
 from __future__ import annotations
+
+import os
 
 from structured_logger import get_logger
 
@@ -20,6 +27,27 @@ try:
     _HAS_LIB = True
 except ImportError:
     _HAS_LIB = False
+
+try:
+    from youtube_transcript_api.proxies import GenericProxyConfig
+    _HAS_PROXY = True
+except ImportError:
+    _HAS_PROXY = False
+
+
+def _build_proxy_config():
+    """Build a proxy config from ``YT_DLP_PROXY`` env var, if set."""
+    proxy_url = os.environ.get("YT_DLP_PROXY", "").strip()
+    if not proxy_url:
+        return None
+    if not _HAS_PROXY:
+        _log.warning(
+            "YT_DLP_PROXY is set but youtube-transcript-api proxy support "
+            "is unavailable (upgrade to >= 1.0.0)"
+        )
+        return None
+    _log.info("Using proxy for YouTube captions", extra={"proxy": proxy_url[:30] + "..."})
+    return GenericProxyConfig(https_url=proxy_url, http_url=proxy_url)
 
 
 def is_available() -> bool:
@@ -33,6 +61,9 @@ def fetch_transcript(video_id: str, languages: tuple[str, ...] = ("en",)) -> dic
     expected by ``deepgram_client.get_raw_text`` and ``get_utterances``.
 
     Returns None when captions are unavailable or the library is missing.
+
+    Reads the ``YT_DLP_PROXY`` environment variable and, when set, routes
+    caption requests through the proxy to avoid IP blocks.
 
     The returned dict has the same structure as a Deepgram response::
 
@@ -52,7 +83,11 @@ def fetch_transcript(video_id: str, languages: tuple[str, ...] = ("en",)) -> dic
         return None
 
     try:
-        ytt_api = YouTubeTranscriptApi()
+        proxy_config = _build_proxy_config()
+        kwargs = {}
+        if proxy_config is not None:
+            kwargs["proxy_config"] = proxy_config
+        ytt_api = YouTubeTranscriptApi(**kwargs)
         transcript = ytt_api.fetch(video_id, languages=list(languages))
         snippets = transcript.snippets
     except Exception as e:
