@@ -1108,7 +1108,7 @@ def chat(
     try:
         client = anthropic.Anthropic(api_key=api_key)
         r = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5-20250929",
             max_tokens=1024,
             system=system,
             messages=[{"role": "user", "content": user_content}],
