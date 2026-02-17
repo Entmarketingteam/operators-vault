@@ -11,9 +11,12 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from deepgram import Deepgram
+    from deepgram import DeepgramClient, PrerecordedOptions
+    DEEPGRAM_AVAILABLE = True
 except ImportError:
-    Deepgram = None  # type: ignore
+    DeepgramClient = None  # type: ignore
+    PrerecordedOptions = None  # type: ignore
+    DEEPGRAM_AVAILABLE = False
 
 log = logging.getLogger(__name__)
 
@@ -35,9 +38,10 @@ def transcribe(
     """
     Transcribe audio file. Returns Deepgram response dict with 'results' and optionally
     'utterances' for segments. Returns None on failure or if deepgram-sdk not installed.
+    Uses Deepgram SDK v5 API (DeepgramClient).
     """
-    if Deepgram is None:
-        _dlog("[deepgram] transcribe: Deepgram SDK not installed")
+    if not DEEPGRAM_AVAILABLE or DeepgramClient is None:
+        _dlog("[deepgram] transcribe: Deepgram SDK not installed or unavailable")
         return None
     api_key = api_key or os.environ.get("DEEPGRAM_API_KEY")
     if not api_key:
@@ -47,22 +51,75 @@ def transcribe(
     if not path.exists():
         _dlog(f"[deepgram] transcribe: file not found {path}")
         return None
-    dg = Deepgram(api_key)
-    with open(path, "rb") as f:
-        payload = f.read()
-    options: dict[str, Any] = {
-        "punctuate": punctuate,
-        "model": model,
-        "smart_format": True,
-    }
-    if utterances:
-        options["utterances"] = True
-    if diarize:
-        options["diarize"] = True
+    
+    # Create Deepgram client (v5 API)
     try:
-        res = dg.transcription.sync_prerecorded(payload, options)
+        deepgram = DeepgramClient(api_key)
+    except Exception as e:
+        _dlog(f"[deepgram] transcribe: failed to create DeepgramClient: {type(e).__name__}: {e}")
+        return None
+    
+    # Read audio file
+    with open(path, "rb") as audio_file:
+        buffer_data = audio_file.read()
+    
+    # Build options using PrerecordedOptions (v5 API)
+    try:
+        options = PrerecordedOptions(
+            model=model,
+            smart_format=True,
+            punctuate=punctuate,
+            utterances=utterances,
+            diarize=diarize,
+        )
+    except Exception as e:
+        _dlog(f"[deepgram] transcribe: failed to create PrerecordedOptions: {type(e).__name__}: {e}")
+        # Fallback to dict if PrerecordedOptions fails
+        options = {
+            "model": model,
+            "smart_format": True,
+            "punctuate": punctuate,
+            "utterances": utterances,
+            "diarize": diarize,
+        }
+    
+    try:
+        # Use v5 API: deepgram.listen.rest.v("1").transcribe_file()
+        response = deepgram.listen.rest.v("1").transcribe_file(
+            {"buffer": buffer_data},
+            options
+        )
+        
+        # Extract the response data (v5 API response structure)
+        # Deepgram v5 returns a response object that may have different structure
+        if isinstance(response, dict):
+            res = response
+        elif hasattr(response, "to_dict"):
+            res = response.to_dict()
+        elif hasattr(response, "results"):
+            # Response object with results attribute
+            res = {
+                "results": response.results,
+                "metadata": getattr(response, "metadata", None),
+            }
+        elif hasattr(response, "__dict__"):
+            # Try to access response as object
+            res_dict = {}
+            for attr in ["results", "metadata", "utterances"]:
+                if hasattr(response, attr):
+                    res_dict[attr] = getattr(response, attr)
+            res = res_dict if res_dict else None
+        else:
+            _dlog(f"[deepgram] transcribe: unexpected response type {type(response)}, dir={dir(response)[:10]}")
+            # Try to log more info for debugging
+            try:
+                _dlog(f"[deepgram] transcribe: response repr={repr(response)[:200]}")
+            except Exception:
+                pass
+            return None
+        
         if not res:
-            _dlog(f"[deepgram] transcribe: sync_prerecorded returned None/empty for {path}")
+            _dlog(f"[deepgram] transcribe: transcribe_file returned None/empty for {path}")
         return res
     except Exception as e:
         _dlog(f"[deepgram] transcribe exception for {path}: {type(e).__name__}: {e}")
