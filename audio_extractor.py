@@ -18,6 +18,25 @@ from structured_logger import get_logger
 log = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
+# IP-block tracker: avoid wasting 60+ seconds per video on retries when
+# we already know the datacenter IP is blocked by YouTube.
+# ---------------------------------------------------------------------------
+_consecutive_blocks: int = 0
+_BLOCK_THRESHOLD: int = 2  # after this many consecutive blocks, skip retries
+
+
+def reset_block_tracker() -> None:
+    """Reset the consecutive-block counter (e.g. after a successful download)."""
+    global _consecutive_blocks
+    _consecutive_blocks = 0
+
+
+def is_ip_blocked() -> bool:
+    """True when recent downloads indicate the IP is blocked by YouTube."""
+    return _consecutive_blocks >= _BLOCK_THRESHOLD
+
+
+# ---------------------------------------------------------------------------
 # Error classification for yt-dlp failures
 # ---------------------------------------------------------------------------
 # Errors that are worth retrying (transient)
@@ -137,7 +156,16 @@ def download_audio(
     - Proper structured logging
     - Shutdown-aware (checks for shutdown signal)
     """
+    global _consecutive_blocks
     log.info("download_audio called", extra={"video_id": video_id, "max_retries": max_retries})
+
+    # Fast-path: if we already know the IP is blocked, fail immediately so the
+    # caller can fall back to YouTube captions without waiting 60+ seconds.
+    if is_ip_blocked():
+        log.info("Skipping yt-dlp (IP known blocked after %d consecutive failures)", _consecutive_blocks,
+                 extra={"video_id": video_id, "consecutive_blocks": _consecutive_blocks})
+        return (None, "IP blocked by YouTube (skipped retries)")
+
     work_dir = Path(work_dir or tempfile.gettempdir())
     work_dir.mkdir(parents=True, exist_ok=True)
 
@@ -210,6 +238,7 @@ def download_audio(
             # Check if file was created
             output_file = _find_output_file(dl_dir, video_id)
             if output_file:
+                _consecutive_blocks = 0  # success resets the block tracker
                 log.info("Download succeeded", extra={
                     "video_id": video_id,
                     "attempt": attempt + 1,
@@ -279,6 +308,7 @@ def download_audio(
                 })
                 if attempt < max_retries:
                     continue
+                _consecutive_blocks += 1
                 return (None, last_error)
 
             # Retryable or unknown: retry if attempts remain

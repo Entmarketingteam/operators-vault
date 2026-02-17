@@ -314,28 +314,51 @@ def _process_one(
         cur.close()
         conn.close()
 
-    # 2) Audio
+    # 2) Audio + Transcription
+    #    Try yt-dlp audio download → Deepgram first.
+    #    If audio download is blocked (datacenter IP), fall back to YouTube
+    #    auto-generated captions which bypass the block entirely.
     _plog(f"  [audio] {video_id}")
     path, err = download_audio(video_id, work_dir)
-    if not path:
-        _plog(f"  [audio] download failed for {video_id}: err={repr(err)}")
-        return False
 
-    # 3) Transcribe (DeepgramAuthError propagates to abort the batch)
-    _plog(f"  [transcribe] {video_id}")
-    try:
-        dg = transcribe(path, punctuate=True, utterances=True, diarize=True)
-    except DeepgramAuthError:
-        _plog(f"  [transcribe] FATAL: Deepgram API key is invalid — aborting")
-        raise
+    dg = None
+    transcript_source = "deepgram"
+
+    if path:
+        # 3a) Transcribe via Deepgram (DeepgramAuthError propagates to abort the batch)
+        _plog(f"  [transcribe] {video_id}")
+        try:
+            dg = transcribe(path, punctuate=True, utterances=True, diarize=True)
+        except DeepgramAuthError:
+            _plog(f"  [transcribe] FATAL: Deepgram API key is invalid — aborting")
+            raise
+    else:
+        _plog(f"  [audio] download failed for {video_id}: err={repr(err)}")
+
+    # 3b) Fallback: YouTube captions (works from datacenter IPs)
+    if dg is None or not get_raw_text(dg):
+        from youtube_transcript import fetch_transcript, is_available
+        if is_available():
+            _plog(f"  [yt-captions] trying YouTube captions fallback for {video_id}")
+            dg = fetch_transcript(video_id)
+            if dg and get_raw_text(dg):
+                transcript_source = "youtube_captions"
+                _plog(f"  [yt-captions] success for {video_id}")
+            else:
+                _plog(f"  [yt-captions] no captions available for {video_id}")
+                dg = None
+        else:
+            _plog(f"  [yt-captions] youtube-transcript-api not installed, skipping fallback")
+
     if dg is None:
-        _plog(f"  [transcribe] failed for {video_id}: transcribe() returned None (check Deepgram logs)")
+        _plog(f"  [transcribe] failed for {video_id}: no audio and no captions available")
         return False
     raw = get_raw_text(dg)
     utterances = get_utterances(dg)
     if not raw:
         _plog(f"  [transcribe] empty transcript for {video_id}: dg keys={list(dg.keys())[:10] if isinstance(dg, dict) else 'not a dict'}")
         return False
+    _plog(f"  [transcribe] {video_id} source={transcript_source} len={len(raw)}")
 
     timestamped = _format_timestamped(utterances) if utterances else raw
 
