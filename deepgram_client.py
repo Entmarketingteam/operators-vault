@@ -90,36 +90,86 @@ def transcribe(
             options
         )
         
-        # Extract the response data (v5 API response structure)
-        # Deepgram v5 returns a response object that may have different structure
-        if isinstance(response, dict):
-            res = response
-        elif hasattr(response, "to_dict"):
-            res = response.to_dict()
-        elif hasattr(response, "results"):
-            # Response object with results attribute
-            res = {
-                "results": response.results,
-                "metadata": getattr(response, "metadata", None),
-            }
-        elif hasattr(response, "__dict__"):
-            # Try to access response as object
-            res_dict = {}
-            for attr in ["results", "metadata", "utterances"]:
-                if hasattr(response, attr):
-                    res_dict[attr] = getattr(response, attr)
-            res = res_dict if res_dict else None
-        else:
-            _dlog(f"[deepgram] transcribe: unexpected response type {type(response)}, dir={dir(response)[:10]}")
-            # Try to log more info for debugging
-            try:
-                _dlog(f"[deepgram] transcribe: response repr={repr(response)[:200]}")
-            except Exception:
-                pass
-            return None
+        # Deepgram v5 SDK returns a PrerecordedTranscriptionResponse object
+        # Convert it to a dict structure compatible with our existing code
+        res: dict[str, Any] = {}
+        
+        # Extract results (contains channels -> alternatives -> transcript)
+        if hasattr(response, "results"):
+            results = response.results
+            # Convert results object to dict if needed
+            if hasattr(results, "to_dict"):
+                res["results"] = results.to_dict()
+            elif hasattr(results, "__dict__"):
+                res["results"] = {
+                    "channels": getattr(results, "channels", []),
+                    "utterances": getattr(results, "utterances", []),
+                }
+            elif isinstance(results, dict):
+                res["results"] = results
+            else:
+                # Try to access channels directly
+                channels = getattr(results, "channels", None)
+                if channels:
+                    res["results"] = {"channels": channels}
+        
+        # Extract metadata
+        if hasattr(response, "metadata"):
+            metadata = response.metadata
+            if hasattr(metadata, "to_dict"):
+                res["metadata"] = metadata.to_dict()
+            elif isinstance(metadata, dict):
+                res["metadata"] = metadata
+            else:
+                res["metadata"] = getattr(metadata, "__dict__", {})
+        
+        # Extract utterances - in v5, utterances are in results.utterances, not top-level
+        # But we also check top-level for compatibility
+        utterances = None
+        if "results" in res and isinstance(res["results"], dict):
+            utterances = res["results"].get("utterances")
+        if not utterances and hasattr(response, "utterances"):
+            utterances = response.utterances
+        if not utterances and hasattr(response, "results") and hasattr(response.results, "utterances"):
+            utterances = response.results.utterances
+        
+        # Normalize utterances to list of dicts
+        if utterances:
+            if isinstance(utterances, list):
+                # Convert utterance objects to dicts if needed
+                normalized_utterances = []
+                for u in utterances:
+                    if isinstance(u, dict):
+                        normalized_utterances.append(u)
+                    elif hasattr(u, "__dict__"):
+                        normalized_utterances.append({
+                            "start": getattr(u, "start", None),
+                            "end": getattr(u, "end", None),
+                            "transcript": getattr(u, "transcript", ""),
+                            "speaker": getattr(u, "speaker", None),
+                        })
+                    elif hasattr(u, "to_dict"):
+                        normalized_utterances.append(u.to_dict())
+                res["utterances"] = normalized_utterances
+            else:
+                res["utterances"] = []
+        
+        # If we still don't have results, try to convert entire response
+        if not res or "results" not in res:
+            if hasattr(response, "to_dict"):
+                res = response.to_dict()
+            elif isinstance(response, dict):
+                res = response
+            else:
+                # Last resort: try to serialize response
+                _dlog(f"[deepgram] transcribe: could not extract results from response type {type(response)}")
+                _dlog(f"[deepgram] transcribe: response attributes: {[a for a in dir(response) if not a.startswith('_')][:20]}")
+                return None
         
         if not res:
             _dlog(f"[deepgram] transcribe: transcribe_file returned None/empty for {path}")
+            return None
+        
         return res
     except Exception as e:
         _dlog(f"[deepgram] transcribe exception for {path}: {type(e).__name__}: {e}")
@@ -132,18 +182,56 @@ def get_raw_text(res: dict[str, Any] | None) -> str:
     if not res:
         _dlog("[deepgram] get_raw_text: res is None/empty")
         return ""
+    
     try:
-        ch = (res.get("results") or {}).get("channels") or []
-        if ch and (ch[0].get("alternatives")):
-            text = (ch[0]["alternatives"][0].get("transcript") or "").strip()
-            if text:
-                return text
+        # Deepgram v5 structure: res.results.channels[0].alternatives[0].transcript
+        results = res.get("results")
+        if not results:
+            _dlog("[deepgram] get_raw_text: no 'results' key in response")
+            return ""
+        
+        # Handle both dict and object formats
+        if isinstance(results, dict):
+            channels = results.get("channels", [])
+        else:
+            # Object format - try to get channels attribute
+            channels = getattr(results, "channels", [])
+            if not isinstance(channels, list):
+                channels = []
+        
+        if channels and len(channels) > 0:
+            ch = channels[0]
+            # Handle both dict and object formats for channel
+            if isinstance(ch, dict):
+                alternatives = ch.get("alternatives", [])
             else:
-                _dlog(f"[deepgram] get_raw_text: transcript exists but is empty/whitespace")
-    except (IndexError, KeyError, TypeError) as e:
+                alternatives = getattr(ch, "alternatives", [])
+                if not isinstance(alternatives, list):
+                    alternatives = []
+            
+            if alternatives and len(alternatives) > 0:
+                alt = alternatives[0]
+                # Handle both dict and object formats for alternative
+                if isinstance(alt, dict):
+                    text = (alt.get("transcript") or "").strip()
+                else:
+                    text = (getattr(alt, "transcript", "") or "").strip()
+                
+                if text:
+                    return text
+                else:
+                    _dlog(f"[deepgram] get_raw_text: transcript exists but is empty/whitespace")
+    except (IndexError, KeyError, TypeError, AttributeError) as e:
         _dlog(f"[deepgram] get_raw_text parse error: {e!r}, res keys={list(res.keys())[:10] if isinstance(res, dict) else 'not a dict'}")
+        # Log more details for debugging
+        try:
+            if isinstance(res, dict):
+                _dlog(f"[deepgram] get_raw_text: results type={type(res.get('results'))}, results keys={list(res.get('results', {}).keys())[:10] if isinstance(res.get('results'), dict) else 'not a dict'}")
+        except Exception:
+            pass
+    
     # Response present but no transcript (wrong shape, or empty transcript)
-    keys = list(res.keys())[:15]
+    keys = list(res.keys())[:15] if isinstance(res, dict) else []
     _dlog(f"[deepgram] get_raw_text: response keys={keys!r}, no transcript extracted. results={res.get('results') is not None if isinstance(res, dict) else 'N/A'}")
     return ""
 
@@ -152,16 +240,37 @@ def get_utterances(res: dict[str, Any] | None) -> list[dict[str, Any]]:
     """
     Extract utterances (segments with start/end, text, optional speaker).
     Each: { start, end, transcript, speaker? }
+    Handles both top-level utterances and results.utterances (v5 API).
     """
     if not res:
         return []
-    u = res.get("utterances") or []
+    
+    # Try top-level utterances first
+    u = res.get("utterances")
+    
+    # If not found, try results.utterances (v5 API structure)
+    if not u and isinstance(res.get("results"), dict):
+        u = res["results"].get("utterances")
+    
+    if not u:
+        return []
+    
     out: list[dict[str, Any]] = []
     for x in u:
-        out.append({
-            "start": x.get("start"),
-            "end": x.get("end"),
-            "transcript": (x.get("transcript") or "").strip(),
-            "speaker": x.get("speaker"),
-        })
+        # Handle both dict and object formats
+        if isinstance(x, dict):
+            out.append({
+                "start": x.get("start"),
+                "end": x.get("end"),
+                "transcript": (x.get("transcript") or "").strip(),
+                "speaker": x.get("speaker"),
+            })
+        else:
+            # Handle object format
+            out.append({
+                "start": getattr(x, "start", None),
+                "end": getattr(x, "end", None),
+                "transcript": (getattr(x, "transcript", "") or "").strip(),
+                "speaker": getattr(x, "speaker", None),
+            })
     return out
