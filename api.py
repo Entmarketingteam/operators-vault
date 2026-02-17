@@ -7,13 +7,17 @@ For Railway: uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000}
 """
 from __future__ import annotations
 
+import atexit
 import contextlib
 import io
 import os
+import signal
 import sys
 import threading
+import time
 import traceback
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 _root = Path(__file__).resolve().parent
@@ -38,10 +42,15 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
+# Structured logging (import early so all modules get JSON logs)
+from structured_logger import get_logger, log_job_event
+
+_log = get_logger("api")
+
 # Import after dotenv
 from pipeline import _fetch_new, _get_unprocessed, _process_one, run_seed_and_process_all, upsert_seed_links
 
-app = FastAPI(title="Operators Vault Pipeline API", version="1.0.1")
+app = FastAPI(title="Operators Vault Pipeline API", version="2.0.0")
 
 # CORS so Vercel (and other) front ends can call /search
 _cors_origins = os.environ.get("CORS_ORIGINS", "*").strip()
@@ -55,6 +64,50 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory=str(_root / "static")), name="static")
+
+
+# ---------------------------------------------------------------------------
+# Startup / Shutdown lifecycle
+# ---------------------------------------------------------------------------
+@app.on_event("startup")
+def _on_startup():
+    _log.info("Container starting", extra={
+        "worker_id": _worker_id,
+        "version": app.version,
+        "pid": os.getpid(),
+    })
+    # Mark any stale running jobs as failed (from a previous container instance)
+    _mark_stale_jobs_failed()
+
+
+@app.on_event("shutdown")
+def _on_shutdown():
+    _log.info("Container shutting down", extra={"worker_id": _worker_id})
+    _shutting_down.set()
+    # Mark all currently running jobs as failed due to shutdown
+    with _jobs_lock:
+        for jid, j in _jobs.items():
+            if j.get("status") == "running":
+                j["status"] = "error"
+                j["error"] = "Container shutdown while job was running"
+                j["updated_at"] = time.time()
+                log_job_event(jid, "failed", {"type": j.get("type"), "reason": "shutdown"})
+    _log.info("Shutdown complete, all running jobs marked failed", extra={"worker_id": _worker_id})
+
+
+def _handle_signal(signum, frame):
+    """Handle SIGTERM/SIGINT for graceful shutdown."""
+    sig_name = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
+    _log.warning("Received signal %s, initiating graceful shutdown", sig_name, extra={"worker_id": _worker_id})
+    _shutting_down.set()
+
+
+# Register signal handlers (best-effort; may fail in non-main thread)
+try:
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+except (ValueError, OSError):
+    pass  # not in main thread
 
 
 def _public_config() -> dict:
@@ -103,9 +156,19 @@ def _verify_supabase_jwt(credentials: HTTPAuthorizationCredentials | None = Depe
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
-# In-memory job store for async /sync and /process-new (202). Lost on restart.
+# ---------------------------------------------------------------------------
+# In-memory job store with lifecycle management
+# ---------------------------------------------------------------------------
+# Each job: {status, type, result, error, logs, worker_id, started_at, updated_at}
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
+_worker_id = f"w-{uuid.uuid4().hex[:8]}"  # unique per container instance
+_shutting_down = threading.Event()
+
+# Stale job threshold: if a running job hasn't updated in this many seconds, mark failed
+_STALE_JOB_TIMEOUT_SEC = int(os.environ.get("STALE_JOB_TIMEOUT_SEC", "900"))  # 15 min default
+# Heartbeat interval for background jobs
+_HEARTBEAT_INTERVAL_SEC = 30
 
 
 class ProcessRequest(BaseModel):
@@ -205,7 +268,7 @@ def _do_fetch_new() -> dict:
         conn.close()
 
 
-def _do_sync() -> dict:
+def _do_sync(job_id: str | None = None) -> dict:
     """Run fetch-new then process-new. Returns {ok, upserted, processed, video_ids}. Raises on env/error."""
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
@@ -213,6 +276,9 @@ def _do_sync() -> dict:
     if not os.environ.get("YOUTUBE_API_KEY"):
         raise HTTPException(status_code=500, detail="YOUTUBE_API_KEY not set")
     import psycopg2
+    _log.info("Sync starting: fetch-new phase")
+    if job_id:
+        _update_job_heartbeat(job_id, progress="fetching new videos")
     conn = psycopg2.connect(db_url)
     cur = conn.cursor()
     upserted = _fetch_new(cur)
@@ -220,27 +286,36 @@ def _do_sync() -> dict:
     rows = _get_unprocessed(cur)
     cur.close()
     conn.close()
+    _log.info("Sync: fetched %d new, %d unprocessed to process", upserted, len(rows))
     processed = []
     errors = []
-    for vid, pod in rows:
+    for i, (vid, pod) in enumerate(rows):
+        if _shutting_down.is_set():
+            _log.warning("Sync interrupted by shutdown after %d/%d videos", i, len(rows))
+            errors.append("Interrupted by container shutdown")
+            break
+        if job_id:
+            _update_job_heartbeat(job_id, progress=f"processing {i+1}/{len(rows)}: {vid}")
         try:
             ok = _process_one(vid, pod)
             if ok:
                 processed.append(vid)
+                _log.info("Processed video %s (%s) successfully", vid, pod)
             else:
-                # _process_one returned False - audio download or processing failed
                 err_msg = f"{vid} ({pod}): Processing failed (check logs for details)"
                 errors.append(err_msg)
+                _log.warning("Processing failed for %s (%s)", vid, pod)
         except Exception as e:
             err_msg = f"{vid} ({pod}): {type(e).__name__}: {e!s}"
-            print(f"  [ERROR] Processing failed: {err_msg}", flush=True)
+            _log.error("Processing exception for %s: %s", vid, err_msg)
             errors.append(err_msg)
     if errors:
-        print(f"  [WARNING] {len(errors)} videos failed to process. First error: {errors[0]}", flush=True)
+        _log.warning("%d videos failed to process. First error: %s", len(errors), errors[0])
+    _log.info("Sync complete: upserted=%d processed=%d errors=%d", upserted, len(processed), len(errors))
     return {"ok": True, "upserted": upserted, "processed": len(processed), "video_ids": processed, "errors": errors[:5]}
 
 
-def _do_process_new() -> dict:
+def _do_process_new(job_id: str | None = None) -> dict:
     """Process all unprocessed videos. Returns {ok, processed, video_ids}. Raises on env/error."""
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
@@ -251,22 +326,32 @@ def _do_process_new() -> dict:
     rows = _get_unprocessed(cur)
     cur.close()
     conn.close()
+    _log.info("process-new: %d unprocessed videos found", len(rows))
     processed = []
     errors = []
-    for vid, pod in rows:
+    for i, (vid, pod) in enumerate(rows):
+        if _shutting_down.is_set():
+            _log.warning("process-new interrupted by shutdown after %d/%d videos", i, len(rows))
+            errors.append("Interrupted by container shutdown")
+            break
+        if job_id:
+            _update_job_heartbeat(job_id, progress=f"processing {i+1}/{len(rows)}: {vid}")
         try:
             ok = _process_one(vid, pod)
             if ok:
                 processed.append(vid)
+                _log.info("Processed video %s (%s) successfully", vid, pod)
             else:
                 err_msg = f"{vid} ({pod}): Processing failed (check logs for details)"
                 errors.append(err_msg)
+                _log.warning("Processing failed for %s (%s)", vid, pod)
         except Exception as e:
             err_msg = f"{vid} ({pod}): {type(e).__name__}: {e!s}"
-            print(f"  [ERROR] Processing failed: {err_msg}", flush=True)
+            _log.error("Processing exception for %s: %s", vid, err_msg)
             errors.append(err_msg)
     if errors:
-        print(f"  [WARNING] {len(errors)} videos failed to process. First error: {errors[0]}", flush=True)
+        _log.warning("%d videos failed to process. First error: %s", len(errors), errors[0])
+    _log.info("process-new complete: processed=%d errors=%d", len(processed), len(errors))
     return {"ok": True, "processed": len(processed), "video_ids": processed, "errors": errors[:5]}
 
 
@@ -314,7 +399,7 @@ def run_migrate_phase1():
 
 @app.get("/health")
 def health():
-    """Check env and connectivity: database, youtube, deepgram, anthropic. Search is Postgres FTS (no Meilisearch)."""
+    """Check env, connectivity, jobs, and resource usage. Returns status, checks, active jobs, and memory info."""
     checks: dict[str, str] = {}
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
@@ -322,7 +407,7 @@ def health():
     else:
         try:
             import psycopg2
-            conn = psycopg2.connect(db_url)
+            conn = psycopg2.connect(db_url, connect_timeout=5)
             conn.close()
             checks["database"] = "ok"
         except Exception as e:
@@ -334,7 +419,7 @@ def health():
         checks["youtube"] = "missing"
     else:
         try:
-            from googleapiclient.discovery import build
+            from googleapiclient.discovery import build  # noqa: F401
             checks["youtube"] = "ok"
         except ImportError:
             checks["youtube"] = "error: google-api-python-client not installed"
@@ -342,8 +427,30 @@ def health():
     checks["anthropic"] = "ok" if os.environ.get("ANTHROPIC_API_KEY") else "missing"
     checks["search"] = "postgres"
 
+    # Job summary
+    with _jobs_lock:
+        running_count = sum(1 for j in _jobs.values() if j.get("status") == "running")
+        total_jobs = len(_jobs)
+
+    # Memory info (best-effort)
+    memory_mb = None
+    try:
+        import resource
+        # maxrss is in KB on Linux
+        memory_mb = round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024, 1)
+    except Exception:
+        pass
+
     status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
-    return {"status": status, "checks": checks}
+    return {
+        "status": status,
+        "checks": checks,
+        "worker_id": _worker_id,
+        "jobs_running": running_count,
+        "jobs_total": total_jobs,
+        "memory_mb": memory_mb,
+        "shutting_down": _shutting_down.is_set(),
+    }
 
 
 def _search_postgres(
@@ -1089,9 +1196,43 @@ def sync():
     return _do_sync()
 
 
+def _update_job_heartbeat(job_id: str, **extra: object) -> None:
+    """Update heartbeat timestamp and optional extra fields for a running job."""
+    with _jobs_lock:
+        j = _jobs.get(job_id)
+        if j and j["status"] == "running":
+            j["updated_at"] = time.time()
+            for k, v in extra.items():
+                j[k] = v
+
+
 def _run_async_job(job_id: str, fn, job_type: str):
-    """Run fn() in a background thread; store result or error in _jobs[job_id], including captured logs."""
+    """Run fn() in a background thread with heartbeat, structured logging, and captured output."""
+    now = time.time()
+    with _jobs_lock:
+        _jobs[job_id] = {
+            "status": "running",
+            "type": job_type,
+            "result": None,
+            "error": None,
+            "logs": None,
+            "worker_id": _worker_id,
+            "started_at": now,
+            "updated_at": now,
+        }
+    log_job_event(job_id, "started", {"type": job_type, "worker_id": _worker_id})
+
+    # Heartbeat thread keeps updated_at fresh so stale detection works
+    heartbeat_stop = threading.Event()
+
+    def heartbeat():
+        while not heartbeat_stop.wait(_HEARTBEAT_INTERVAL_SEC):
+            _update_job_heartbeat(job_id)
+            log_job_event(job_id, "heartbeat", {"type": job_type})
+
     def run():
+        hb = threading.Thread(target=heartbeat, daemon=True)
+        hb.start()
         buf_out = io.StringIO()
         buf_err = io.StringIO()
         try:
@@ -1100,30 +1241,38 @@ def _run_async_job(job_id: str, fn, job_type: str):
             with _jobs_lock:
                 _jobs[job_id]["status"] = "done"
                 _jobs[job_id]["result"] = out
+                _jobs[job_id]["updated_at"] = time.time()
                 _jobs[job_id]["logs"] = {
                     "stdout": buf_out.getvalue()[-8000:],
                     "stderr": buf_err.getvalue()[-8000:],
                 }
+            log_job_event(job_id, "completed", {"type": job_type, "result_keys": list((out or {}).keys()) if isinstance(out, dict) else None})
         except HTTPException as e:
+            err_str = f"{e.status_code}: {e.detail}"
             with _jobs_lock:
                 _jobs[job_id]["status"] = "error"
-                _jobs[job_id]["error"] = f"{e.status_code}: {e.detail}"
+                _jobs[job_id]["error"] = err_str
+                _jobs[job_id]["updated_at"] = time.time()
                 _jobs[job_id]["logs"] = {
                     "stdout": buf_out.getvalue()[-8000:],
                     "stderr": (buf_err.getvalue() + "\n" + traceback.format_exc())[-8000:],
                 }
+            log_job_event(job_id, "failed", {"type": job_type, "error": err_str})
         except Exception as e:
+            err_str = f"{type(e).__name__}: {e!s}"
             with _jobs_lock:
                 _jobs[job_id]["status"] = "error"
-                _jobs[job_id]["error"] = str(e)
+                _jobs[job_id]["error"] = err_str
+                _jobs[job_id]["updated_at"] = time.time()
                 _jobs[job_id]["logs"] = {
                     "stdout": buf_out.getvalue()[-8000:],
                     "stderr": (buf_err.getvalue() + "\n" + traceback.format_exc())[-8000:],
                 }
+            log_job_event(job_id, "failed", {"type": job_type, "error": err_str})
+        finally:
+            heartbeat_stop.set()
 
-    with _jobs_lock:
-        _jobs[job_id] = {"status": "running", "type": job_type, "result": None, "error": None, "logs": None}
-    t = threading.Thread(target=run, daemon=True)
+    t = threading.Thread(target=run, daemon=True, name=f"job-{job_id[:8]}")
     t.start()
 
 
@@ -1136,10 +1285,35 @@ def _async_202_response(job_id: str, job_type: str) -> JSONResponse:
     )
 
 
-def _running_sync_job_id() -> str | None:
-    """If a sync job is already running, return its job_id; else None. Caller must hold _jobs_lock or call from sync endpoint only."""
+def _is_job_stale(j: dict) -> bool:
+    """Check if a running job has gone stale (no heartbeat update within threshold)."""
+    if j.get("status") != "running":
+        return False
+    updated = j.get("updated_at") or j.get("started_at") or 0
+    return (time.time() - updated) > _STALE_JOB_TIMEOUT_SEC
+
+
+def _mark_stale_jobs_failed() -> int:
+    """Mark any running jobs that have gone stale as failed. Returns count of jobs marked."""
+    count = 0
+    with _jobs_lock:
+        for jid, j in _jobs.items():
+            if _is_job_stale(j):
+                j["status"] = "error"
+                j["error"] = f"Stale: no heartbeat for {_STALE_JOB_TIMEOUT_SEC}s (likely container restart)"
+                j["updated_at"] = time.time()
+                count += 1
+                log_job_event(jid, "failed", {"type": j.get("type"), "reason": "stale_timeout"})
+    if count:
+        _log.warning("Marked %d stale jobs as failed", count)
+    return count
+
+
+def _running_job_id(job_type: str) -> str | None:
+    """If a non-stale job of the given type is already running, return its job_id; else None.
+    Caller must hold _jobs_lock."""
     for jid, j in _jobs.items():
-        if j.get("type") == "sync" and j.get("status") == "running":
+        if j.get("type") == job_type and j.get("status") == "running" and not _is_job_stale(j):
             return jid
     return None
 
@@ -1148,12 +1322,14 @@ def _running_sync_job_id() -> str | None:
 def sync_async():
     """Like POST /sync but returns 202 Accepted with job_id. Poll GET /jobs/{job_id} for status. Good when sync is slow. Only one sync at a time."""
     try:
+        _mark_stale_jobs_failed()
         with _jobs_lock:
-            existing = _running_sync_job_id()
+            existing = _running_job_id("sync")
             if existing is not None:
+                _log.info("Sync already running, returning existing job", extra={"job_id": existing})
                 return _async_202_response(existing, "sync")
         job_id = str(uuid.uuid4())
-        _run_async_job(job_id, _do_sync, "sync")
+        _run_async_job(job_id, lambda: _do_sync(job_id=job_id), "sync")
         return _async_202_response(job_id, "sync")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start sync: {e!s}")
@@ -1161,10 +1337,16 @@ def sync_async():
 
 @app.post("/process-new/async")
 def process_new_async():
-    """Like POST /process-new but returns 202 Accepted with job_id. Poll GET /jobs/{job_id} for status."""
+    """Like POST /process-new but returns 202 Accepted with job_id. Poll GET /jobs/{job_id} for status. Only one process-new at a time."""
     try:
+        _mark_stale_jobs_failed()
+        with _jobs_lock:
+            existing = _running_job_id("process-new")
+            if existing is not None:
+                _log.info("process-new already running, returning existing job", extra={"job_id": existing})
+                return _async_202_response(existing, "process-new")
         job_id = str(uuid.uuid4())
-        _run_async_job(job_id, _do_process_new, "process-new")
+        _run_async_job(job_id, lambda: _do_process_new(job_id=job_id), "process-new")
         return _async_202_response(job_id, "process-new")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start process-new: {e!s}")
@@ -1198,12 +1380,14 @@ def trigger_sync_get(key: str | None = None):
     if os.environ.get("SYNC_TRIGGER_KEY") and (key or "").strip() != os.environ.get("SYNC_TRIGGER_KEY", ""):
         raise HTTPException(status_code=401, detail="Invalid or missing key")
     try:
+        _mark_stale_jobs_failed()
         with _jobs_lock:
-            existing = _running_sync_job_id()
+            existing = _running_job_id("sync")
             if existing is not None:
+                _log.info("Sync already running (trigger), returning existing job", extra={"job_id": existing})
                 return _async_202_response(existing, "sync")
         job_id = str(uuid.uuid4())
-        _run_async_job(job_id, _do_sync, "sync")
+        _run_async_job(job_id, lambda: _do_sync(job_id=job_id), "sync")
         return _async_202_response(job_id, "sync")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start sync: {e!s}")
@@ -1211,12 +1395,18 @@ def trigger_sync_get(key: str | None = None):
 
 @app.get("/trigger-process-new")
 def trigger_process_new_get(key: str | None = None):
-    """GET trigger for process-new (cron/n8n). Returns 202 + job_id. Optional: ?key=SYNC_TRIGGER_KEY."""
+    """GET trigger for process-new (cron/n8n). Returns 202 + job_id. Optional: ?key=SYNC_TRIGGER_KEY. Only one process-new at a time."""
     if os.environ.get("SYNC_TRIGGER_KEY") and (key or "").strip() != os.environ.get("SYNC_TRIGGER_KEY", ""):
         raise HTTPException(status_code=401, detail="Invalid or missing key")
     try:
+        _mark_stale_jobs_failed()
+        with _jobs_lock:
+            existing = _running_job_id("process-new")
+            if existing is not None:
+                _log.info("process-new already running (trigger), returning existing job", extra={"job_id": existing})
+                return _async_202_response(existing, "process-new")
         job_id = str(uuid.uuid4())
-        _run_async_job(job_id, _do_process_new, "process-new")
+        _run_async_job(job_id, lambda: _do_process_new(job_id=job_id), "process-new")
         return _async_202_response(job_id, "process-new")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to start process-new: {e!s}")
@@ -1276,14 +1466,45 @@ def get_job(job_id: str):
         j = _jobs.get(job_id)
     if not j:
         raise HTTPException(status_code=404, detail="Job not found")
-    out = {"job_id": job_id, "status": j["status"], "type": j.get("type")}
+    out: dict = {
+        "job_id": job_id,
+        "status": j["status"],
+        "type": j.get("type"),
+        "worker_id": j.get("worker_id"),
+        "started_at": datetime.fromtimestamp(j["started_at"], tz=timezone.utc).isoformat() if j.get("started_at") else None,
+        "updated_at": datetime.fromtimestamp(j["updated_at"], tz=timezone.utc).isoformat() if j.get("updated_at") else None,
+    }
     if j.get("result") is not None:
         out["result"] = j["result"]
     if j.get("error") is not None:
         out["error"] = j["error"]
     if j.get("logs") is not None:
         out["logs"] = j["logs"]
+    if j.get("progress"):
+        out["progress"] = j["progress"]
     return out
+
+
+@app.get("/jobs")
+def list_jobs(status: str | None = None):
+    """List all jobs, optionally filtered by status (running, done, error). Most recent first."""
+    with _jobs_lock:
+        items = []
+        for jid, j in _jobs.items():
+            if status and j.get("status") != status:
+                continue
+            items.append({
+                "job_id": jid,
+                "status": j["status"],
+                "type": j.get("type"),
+                "worker_id": j.get("worker_id"),
+                "started_at": datetime.fromtimestamp(j["started_at"], tz=timezone.utc).isoformat() if j.get("started_at") else None,
+                "updated_at": datetime.fromtimestamp(j["updated_at"], tz=timezone.utc).isoformat() if j.get("updated_at") else None,
+                "error": j.get("error"),
+                "progress": j.get("progress"),
+            })
+    items.sort(key=lambda x: x.get("started_at") or "", reverse=True)
+    return {"jobs": items, "total": len(items), "worker_id": _worker_id}
 
 
 @app.get("/stats")
@@ -1338,6 +1559,8 @@ def stats():
 def root():
     return {
         "service": "Operators Vault Pipeline API",
+        "version": app.version,
+        "worker_id": _worker_id,
         "docs": "/docs",
         "health": "/health",
         "stats": "/stats",
@@ -1358,12 +1581,13 @@ def root():
         "visuals": "/visuals",
         "related": "/related",
         "sync": "POST /sync",
-        "sync_async": "POST /sync/async (202 + job)",
-        "process_new_async": "POST /process-new/async (202 + job)",
+        "sync_async": "POST /sync/async (202 + job, one at a time)",
+        "process_new_async": "POST /process-new/async (202 + job, one at a time)",
         "process_one_async": "POST /process-one/async (body: video_id, podcast; 202 + job)",
-        "trigger_sync": "GET /trigger-sync (?key= for cron)",
-        "trigger_process_new": "GET /trigger-process-new (?key= for cron)",
+        "trigger_sync": "GET /trigger-sync (?key= for cron, one at a time)",
+        "trigger_process_new": "GET /trigger-process-new (?key= for cron, one at a time)",
         "seed_links": "POST /seed-links (JSON), POST /seed-links/csv (multipart) — store links in Supabase seed_links",
         "backfill": "POST /backfill (optional multipart CSVs; or none to run from seed_links in DB; 202 + job)",
-        "jobs": "GET /jobs/{job_id}",
+        "jobs_list": "GET /jobs (?status=running|done|error)",
+        "jobs_detail": "GET /jobs/{job_id}",
     }
