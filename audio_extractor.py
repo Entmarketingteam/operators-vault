@@ -36,6 +36,27 @@ def is_ip_blocked() -> bool:
     return _consecutive_blocks >= _BLOCK_THRESHOLD
 
 
+# Placeholder hostnames that should never be used as real proxies.
+_PROXY_PLACEHOLDER_HOSTS = ("example.com", "example.org", "example.net")
+
+
+def _get_proxy_url() -> str:
+    """Return the proxy URL from ``YT_DLP_PROXY``, or empty string if unset or placeholder."""
+    raw = os.environ.get("YT_DLP_PROXY", "").strip()
+    if not raw:
+        return ""
+    # Skip placeholder URLs left over from .env.example
+    lower = raw.lower()
+    for host in _PROXY_PLACEHOLDER_HOSTS:
+        if host in lower:
+            log.warning(
+                "Ignoring YT_DLP_PROXY: looks like a placeholder (%s)",
+                raw[:60],
+            )
+            return ""
+    return raw
+
+
 # ---------------------------------------------------------------------------
 # Error classification for yt-dlp failures
 # ---------------------------------------------------------------------------
@@ -78,6 +99,9 @@ _PERMANENT_PATTERNS = [
     "account has been terminated",
     "copyright",
     "404",
+    "unable to connect to proxy",   # proxy unreachable — retrying won't help
+    "proxyerror",                    # generic proxy failure
+    "failed to resolve",            # DNS failure for proxy host
 ]
 
 
@@ -185,8 +209,8 @@ def download_audio(
     # Build command
     base_cmd = _build_yt_dlp_cmd()
 
-    # Optional proxy
-    proxy_url = os.environ.get("YT_DLP_PROXY", "").strip()
+    # Optional proxy (skip placeholder/example URLs)
+    proxy_url = _get_proxy_url()
     proxy_args = ["--proxy", proxy_url] if proxy_url else []
 
     # Optional cookies file (for authenticated downloads, bypassing some restrictions)

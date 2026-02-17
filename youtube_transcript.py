@@ -35,11 +35,27 @@ except ImportError:
     _HAS_PROXY = False
 
 
+_PROXY_PLACEHOLDER_HOSTS = ("example.com", "example.org", "example.net")
+
+
 def _build_proxy_config():
-    """Build a proxy config from ``YT_DLP_PROXY`` env var, if set."""
+    """Build a proxy config from ``YT_DLP_PROXY`` env var, if set.
+
+    Skips placeholder URLs (containing ``example.com`` etc.) so that
+    leftover ``.env.example`` values don't break caption fetching.
+    """
     proxy_url = os.environ.get("YT_DLP_PROXY", "").strip()
     if not proxy_url:
         return None
+    # Skip placeholder URLs left over from .env.example
+    lower = proxy_url.lower()
+    for host in _PROXY_PLACEHOLDER_HOSTS:
+        if host in lower:
+            _log.warning(
+                "Ignoring YT_DLP_PROXY for captions: looks like a placeholder (%s)",
+                proxy_url[:60],
+            )
+            return None
     if not _HAS_PROXY:
         _log.warning(
             "YT_DLP_PROXY is set but youtube-transcript-api proxy support "
