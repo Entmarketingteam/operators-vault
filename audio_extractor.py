@@ -190,8 +190,24 @@ def download_audio(
     proxy_args = ["--proxy", proxy_url] if proxy_url else []
 
     # Optional cookies file (for authenticated downloads, bypassing some restrictions)
+    # Supports: YT_DLP_COOKIES (file path) or YT_DLP_COOKIES_B64 (base64-encoded cookies file
+    # content, for cloud deployments like Railway where you can't mount files easily).
     cookies_path = os.environ.get("YT_DLP_COOKIES", "").strip()
+    cookies_b64 = os.environ.get("YT_DLP_COOKIES_B64", "").strip()
     cookies_args: list[str] = []
+    if cookies_b64 and not (cookies_path and Path(cookies_path).exists()):
+        import base64
+        import gzip as _gzip
+        raw = base64.b64decode(cookies_b64)
+        # Support both gzip-compressed and plain base64
+        try:
+            raw = _gzip.decompress(raw)
+        except _gzip.BadGzipFile:
+            pass
+        _cookies_tmp = work_dir / ".yt_cookies.txt"
+        _cookies_tmp.write_bytes(raw)
+        cookies_path = str(_cookies_tmp)
+        log.info("Decoded cookies from YT_DLP_COOKIES_B64", extra={"video_id": video_id})
     if cookies_path and Path(cookies_path).exists():
         cookies_args = ["--cookies", cookies_path]
         log.info("Using cookies file", extra={"video_id": video_id, "cookies_path": cookies_path})
