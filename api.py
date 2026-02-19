@@ -470,7 +470,7 @@ def health():
         except Exception as e:
             checks["deepgram"] = f"error: {e!s}"
     checks["anthropic"] = "ok" if os.environ.get("ANTHROPIC_API_KEY") else "missing"
-    checks["search"] = "postgres"
+    checks["search"] = "ok"  # Using Postgres FTS as intended search backend
 
     # Job summary
     with _jobs_lock:
