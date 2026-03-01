@@ -41,10 +41,39 @@
 
 ## Next Steps (When Picking Up)
 
-1. **Done:** All phases complete. Postgres search migration applied; `SUPABASE_JWT_SECRET` on Railway; Supabase Auth (Email + Google) enabled via `enable_supabase_auth.py`; n8n sync daily; Google OAuth in Supabase.
-2. **Run migrations:** `python scripts/run_all.py --migration-only` to apply Phase 2 and 3 migrations if not already done.
-3. **Optional backfill:** `python pipeline.py --seed-csvs --process-all` (CSVs in `%USERPROFILE%\Downloads\`) to populate data.
-4. **If “keep building”:** Add Supabase JS sign-in on `/search-ui`; enhance facets sidebar with dynamic person/company lists; custom domain; visual moments UI page.
+### ⚡ IMMEDIATE — Run locally (not on Railway)
+
+Railway's cloud IP is blocked by YouTube — audio downloads and caption API both fail.
+**40 new videos were fetched on 2026-03-01 and are sitting unprocessed in the DB.**
+Run processing on a non-cloud machine (home PC, Mac, etc.):
+
+```bash
+git clone https://github.com/Entmarketingteam/operators-vault
+cd operators-vault
+pip install -r requirements.txt
+# Copy .env from the other machine or pull from Doppler (see docs/DOPPLER.md)
+python pipeline.py --process-new
+```
+
+This will process all ~53 unprocessed videos. Takes a few hours. Watch for errors in stdout.
+
+### Current data state (as of 2026-03-01)
+
+| Podcast | Videos in DB | Processed |
+|---------|-------------|-----------|
+| 9 Operators | ~33 | 14 |
+| Marketing Operator | ~30 | 8 |
+| Finance Operators | ~13 | 1 |
+
+### After processing runs
+
+1. **Custom domain** — Add to Railway → Settings → Public Networking. See `HOSTING.md`.
+2. **Auth wall decision** — `/search` requires Supabase Bearer token. If public-facing, consider removing auth or adding public read-only mode.
+3. **TITANS playlist** — `YOUTUBE_PLAYLIST_TITANS` not set in Railway env; TITANS episodes are not being synced. Add the playlist ID to unlock that podcast.
+
+### If Railway processing is needed long-term
+
+Set `YT_DLP_PROXY` in Railway env vars to a residential proxy URL (Bright Data, Oxylabs, Smartproxy). Same var covers both yt-dlp and caption fallback.
 
 ---
 
