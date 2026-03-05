@@ -161,7 +161,7 @@ def download_audio(
 
     # Fast-path: if we already know the IP is blocked, fail immediately so the
     # caller can fall back to YouTube captions without waiting 60+ seconds.
-    if is_ip_blocked():
+    if os.environ.get("SKIP_YTDLP") or is_ip_blocked():
         log.info("Skipping yt-dlp (IP known blocked after %d consecutive failures)", _consecutive_blocks,
                  extra={"video_id": video_id, "consecutive_blocks": _consecutive_blocks})
         return (None, "IP blocked by YouTube (skipped retries)")
