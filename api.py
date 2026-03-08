@@ -629,6 +629,48 @@ def _search_postgres(
         finally:
             cur.close()
             conn.close()
+    # Newsletter insights — included unless type_ is "moments" or explicit "insights" with no q
+    if type_ in ("insights", "all", "newsletters") and q and q.strip():
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+        cur = conn.cursor()
+        try:
+            nl_where = ["to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')) @@ plainto_tsquery('english', %s)"]
+            nl_params: list = [q.strip()]
+            if category:
+                nl_where.append("ni.category ILIKE %s")
+                nl_params.append(f"%{category}%")
+            nl_params.append(limit)
+            cur.execute(
+                f"""
+                SELECT ni.id, ni.source, ni.category, ni.title, ni.description,
+                       n.subject, n.author, n.published_at,
+                       ts_rank(to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')), plainto_tsquery('english', %s)) AS rank
+                FROM newsletter_insights ni
+                JOIN newsletters n ON n.id = ni.newsletter_id
+                WHERE {" AND ".join(nl_where)}
+                ORDER BY rank DESC
+                LIMIT %s
+                """,
+                [q.strip()] + nl_params,
+            )
+            for row in cur.fetchall():
+                hits.append({
+                    "type": "newsletter_insight",
+                    "id": str(row[0]),
+                    "source": row[1],
+                    "category": row[2],
+                    "title": row[3],
+                    "description": row[4],
+                    "subject": row[5],
+                    "author": row[6],
+                    "published_at": row[7].isoformat() if row[7] else None,
+                    "rank": float(row[8]) if row[8] is not None else 0,
+                    "headline_title": row[3],
+                    "headline_description": row[4],
+                })
+        finally:
+            cur.close()
+            conn.close()
     if type_ == "all" and hits:
         hits.sort(key=lambda h: h.get("rank") or 0, reverse=True)
         hits = hits[:limit]
