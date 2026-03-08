@@ -349,7 +349,8 @@ def _do_sync(job_id: str | None = None) -> dict:
 
 
 def _do_process_new(job_id: str | None = None) -> dict:
-    """Process all unprocessed videos. Returns {ok, processed, video_ids}. Raises on env/error."""
+    """Process all unprocessed videos in parallel. Returns {ok, processed, video_ids}. Raises on env/error."""
+    import concurrent.futures
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         raise HTTPException(status_code=500, detail="DATABASE_URL not set")
@@ -367,38 +368,49 @@ def _do_process_new(job_id: str | None = None) -> dict:
     rows = _get_unprocessed(cur)
     cur.close()
     conn.close()
-    _log.info("process-new: %d unprocessed videos found", len(rows))
+
+    workers = int(os.environ.get("PROCESS_NEW_WORKERS", "4"))
+    _log.info("process-new: %d unprocessed videos found, workers=%d", len(rows), workers)
+
     processed = []
     errors = []
-    for i, (vid, pod) in enumerate(rows):
+    done_count = 0
+    lock = threading.Lock()
+
+    def _run_one(args):
+        nonlocal done_count
+        vid, pod = args
         if _shutting_down.is_set():
-            _log.warning("process-new interrupted by shutdown after %d/%d videos", i, len(rows))
-            errors.append("Interrupted by container shutdown")
-            break
-        if job_id:
-            _update_job_heartbeat(job_id, progress=f"processing {i+1}/{len(rows)}: {vid}")
+            return vid, False, "Interrupted by container shutdown"
         try:
             ok = _process_one(vid, pod)
+            with lock:
+                done_count += 1
+                if job_id:
+                    _update_job_heartbeat(job_id, progress=f"processed {done_count}/{len(rows)}: {vid}")
+            if ok:
+                _log.info("Processed video %s (%s) successfully", vid, pod)
+                return vid, True, None
+            else:
+                _log.warning("Processing failed for %s (%s)", vid, pod)
+                return vid, False, f"{vid} ({pod}): Processing failed"
+        except DeepgramAuthError as e:
+            return vid, False, f"FATAL:Deepgram:{e}"
+        except Exception as e:
+            _log.error("Processing exception for %s: %s", vid, e)
+            return vid, False, f"{vid} ({pod}): {type(e).__name__}: {e!s}"
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+        for vid, ok, err in executor.map(_run_one, rows):
+            if err and err.startswith("FATAL:Deepgram:"):
+                errors.append(err)
+                executor.shutdown(wait=False, cancel_futures=True)
+                break
             if ok:
                 processed.append(vid)
-                _log.info("Processed video %s (%s) successfully", vid, pod)
-            else:
-                err_msg = f"{vid} ({pod}): Processing failed (check logs for details)"
-                print(f"  [WARNING] Processing failed for {vid} ({pod})", flush=True)
-                errors.append(err_msg)
-                _log.warning("Processing failed for %s (%s)", vid, pod)
-        except DeepgramAuthError as e:
-            err_msg = f"FATAL: Deepgram API key invalid — aborting remaining {len(rows) - i - 1} videos. {e}"
-            _log.error(err_msg)
-            errors.append(err_msg)
-            break
-        except Exception as e:
-            err_msg = f"{vid} ({pod}): {type(e).__name__}: {e!s}"
-            _log.error("Processing exception for %s: %s", vid, err_msg)
-            print(f"  [ERROR] Processing failed: {err_msg}", flush=True)
-            import traceback
-            print(f"  [ERROR] Traceback: {traceback.format_exc()}", flush=True)
-            errors.append(err_msg)
+            elif err:
+                errors.append(err)
+
     if errors:
         _log.warning("%d videos failed to process. First error: %s", len(errors), errors[0])
     _log.info("process-new complete: processed=%d errors=%d", len(processed), len(errors))
