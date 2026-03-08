@@ -1644,6 +1644,45 @@ def root():
 
 # ── Newsletter endpoints ───────────────────────────────────────────────────────
 
+# Background queue for async Claude extraction after fast email storage
+import queue as _queue
+_newsletter_extract_queue: _queue.Queue = _queue.Queue()
+_newsletter_worker_started = False
+
+def _newsletter_extract_worker():
+    """Background thread: pick up newsletter_ids and run Claude extraction."""
+    import psycopg2
+    from newsletter_ingestor import extract_newsletter_insights, store_newsletter_insights, chunk_text, _db_conn
+    while True:
+        try:
+            newsletter_id, source, body_text = _newsletter_extract_queue.get(timeout=5)
+            try:
+                chunks = chunk_text(body_text)
+                all_insights = []
+                for chunk in chunks:
+                    chunk_insights = extract_newsletter_insights(chunk)
+                    for ins in chunk_insights:
+                        ins["source_chunk"] = chunk[:500]
+                    all_insights.extend(chunk_insights)
+                store_newsletter_insights(newsletter_id, source, all_insights)
+                _log.info("newsletter_extracted", extra={"newsletter_id": newsletter_id, "insights": len(all_insights)})
+            except Exception as e:
+                _log.error("newsletter_extract_failed", extra={"newsletter_id": newsletter_id, "error": str(e)})
+            finally:
+                _newsletter_extract_queue.task_done()
+        except _queue.Empty:
+            continue
+        except Exception:
+            continue
+
+def _ensure_newsletter_worker():
+    global _newsletter_worker_started
+    if not _newsletter_worker_started:
+        t = threading.Thread(target=_newsletter_extract_worker, daemon=True, name="newsletter-extractor")
+        t.start()
+        _newsletter_worker_started = True
+
+
 class NewsletterIngestRequest(BaseModel):
     email_id: str
     source: str                       # nik_sharma | taylor_holiday | matt_bertulli | chase_dimond | operators_newsletter
@@ -1659,13 +1698,15 @@ class NewsletterIngestRequest(BaseModel):
 def ingest_newsletter(req: NewsletterIngestRequest):
     """
     Ingest one newsletter email. Called by n8n Gmail trigger.
-    Strips HTML, extracts insights via Claude, stores in Supabase.
-    Returns {email_id, newsletter_id, is_new, insights_count, status}.
+    Stores email immediately, queues Claude extraction in background.
+    Returns {email_id, newsletter_id, status} quickly without blocking on Claude.
     """
-    from newsletter_ingestor import ingest_email, infer_source_from_sender, NEWSLETTER_SOURCES
+    from newsletter_ingestor import (
+        infer_source_from_sender, NEWSLETTER_SOURCES,
+        strip_html, clean_email_text, upsert_newsletter
+    )
 
     source = req.source
-    # Auto-detect source from sender if not explicitly set or if "unknown"
     if (not source or source == "unknown") and req.sender_email:
         inferred = infer_source_from_sender(req.sender_email)
         if inferred:
@@ -1677,18 +1718,60 @@ def ingest_newsletter(req: NewsletterIngestRequest):
     author = req.author or (NEWSLETTER_SOURCES.get(source, {}).get("author", source))
 
     try:
-        result = ingest_email(
-            email_id=req.email_id,
-            source=source,
-            author=author,
-            subject=req.subject,
-            published_at=req.published_at,
-            body_html=req.body_html,
-            body_text=req.body_text,
+        # Clean body
+        body_text = req.body_text
+        if req.body_html and not body_text:
+            body_text = strip_html(req.body_html)
+        body_text = clean_email_text(body_text)
+
+        if not body_text or len(body_text) < 100:
+            return {"email_id": req.email_id, "status": "skipped", "reason": "body too short", "insights_count": 0}
+
+        # Store immediately (non-blocking)
+        newsletter_id, is_new = upsert_newsletter(
+            req.email_id, source, author, req.subject, req.published_at, body_text
         )
-        return result
+        if not is_new:
+            return {"email_id": req.email_id, "newsletter_id": newsletter_id, "status": "duplicate", "insights_count": 0}
+
+        # Queue Claude extraction in background
+        _ensure_newsletter_worker()
+        _newsletter_extract_queue.put((newsletter_id, source, body_text))
+
+        return {"email_id": req.email_id, "newsletter_id": newsletter_id, "status": "queued", "insights_count": 0}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {e!s}")
+
+
+@app.post("/process-newsletters")
+def process_newsletters(limit: int = 50):
+    """
+    Manually trigger Claude extraction for all unprocessed newsletters.
+    Queues up to `limit` newsletters for background processing.
+    """
+    import psycopg2, os
+    _ensure_newsletter_worker()
+    from newsletter_ingestor import _db_conn
+
+    conn = _db_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, source, body_text FROM newsletters WHERE processed = FALSE AND body_text IS NOT NULL ORDER BY created_at ASC LIMIT %s",
+                (limit,)
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    queued = 0
+    for row in rows:
+        newsletter_id, source, body_text = str(row[0]), row[1], row[2]
+        if body_text and len(body_text) >= 100:
+            _newsletter_extract_queue.put((newsletter_id, source, body_text))
+            queued += 1
+
+    return {"queued": queued, "queue_size": _newsletter_extract_queue.qsize()}
 
 
 @app.get("/newsletters")
