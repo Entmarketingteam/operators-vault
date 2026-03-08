@@ -47,10 +47,6 @@ Extract key insights and organize them into the following **6 categories**. Use 
 5. Be thorough — capture all valuable insights, especially tactical ones.
 6. Skip promotional content, event invites, and filler.
 
-Before your final output, wrap your extraction process in `<extraction_process>...</extraction_process>`.
-
----
-
 ## Output format
 
 ---

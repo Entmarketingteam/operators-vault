@@ -73,11 +73,34 @@ def _parse_insight_block(block: str, category: str) -> list[dict[str, str]]:
     return out
 
 
+_VALID_CATEGORIES = {
+    "Frameworks and exercises",
+    "Points of view and perspectives",
+    "Tactical recommendations",
+    "Stories and case studies",
+    "Quotes",
+    "Tools and products",
+}
+
+def _normalize_category(raw: str) -> str:
+    """Normalize a category header to a canonical name."""
+    # Strip markdown heading markers and whitespace
+    c = re.sub(r"^#+\s*", "", raw).strip().rstrip(":").strip()
+    # Case-insensitive match against valid categories
+    for valid in _VALID_CATEGORIES:
+        if c.lower() == valid.lower():
+            return valid
+    return c
+
+
 def parse_extract_insights_output(text: str) -> list[dict[str, str]]:
     """
     Parse the ---...--- output from extract_insights into list of {category, title, description}.
     Handles one block with multiple "Category Name:" sections and/or multiple --- blocks.
     """
+    # Strip <extraction_process> blocks (Claude thinking artifacts)
+    text = re.sub(r"<extraction_process>[\s\S]*?</extraction_process>", "", text, flags=re.IGNORECASE)
+
     out: list[dict[str, str]] = []
     # Normalize: strip leading/trailing ---, then split by --- to get blocks
     t = re.sub(r"^\s*---+\s*\n?", "", text)
@@ -91,6 +114,7 @@ def parse_extract_insights_output(text: str) -> list[dict[str, str]]:
         if not lines:
             continue
         # Within a block, category headers are lines like "Frameworks and exercises:" (end with :, no *).
+        # Also handle "## Frameworks and exercises:" markdown headers.
         # Subsequent * lines belong to that category until the next header.
         category = ""
         current: list[str] = []
@@ -98,11 +122,13 @@ def parse_extract_insights_output(text: str) -> list[dict[str, str]]:
             stripped = line.strip()
             if not stripped:
                 continue
-            # New category header: "Category Name:" (no leading *)
-            if not stripped.startswith("*") and stripped.endswith(":"):
+            # New category header: starts with ## or (no leading *) and ends with :
+            is_md_header = stripped.startswith("#")
+            is_plain_header = not stripped.startswith("*") and stripped.endswith(":")
+            if is_md_header or is_plain_header:
                 if current and category:
                     out.extend(_parse_insight_block("\n".join(current), category))
-                category = stripped.rstrip(":").strip()
+                category = _normalize_category(stripped)
                 current = []
             elif stripped.startswith("*"):
                 current.append(stripped)
@@ -112,10 +138,12 @@ def parse_extract_insights_output(text: str) -> list[dict[str, str]]:
         if not out and not category and lines:
             cat_line = lines[0].rstrip(":")
             if not cat_line.startswith("*"):
-                category = cat_line.strip()
+                category = _normalize_category(cat_line)
                 rest = "\n".join(lines[1:])
                 out.extend(_parse_insight_block(rest, category))
-    return out
+
+    # Filter to only valid categories
+    return [i for i in out if i.get("category") in _VALID_CATEGORIES]
 
 
 def extract_insights(transcript: str, prompt_set: str = DEFAULT_PROMPT_SET) -> list[dict[str, str]]:
