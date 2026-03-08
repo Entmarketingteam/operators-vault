@@ -1673,6 +1673,15 @@ def _newsletter_extract_worker():
         try:
             newsletter_id, source, body_text = _newsletter_extract_queue.get(timeout=5)
             try:
+                # Skip if already processed (handles duplicates in queue)
+                conn = _db_conn()
+                with conn.cursor() as cur:
+                    cur.execute("SELECT processed FROM newsletters WHERE id = %s", (newsletter_id,))
+                    row = cur.fetchone()
+                conn.close()
+                if not row or row[0]:
+                    _newsletter_extract_queue.task_done()
+                    continue
                 chunks = chunk_text(body_text)
                 all_insights = []
                 for chunk in chunks:
