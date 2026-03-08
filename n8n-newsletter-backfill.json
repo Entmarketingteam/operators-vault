@@ -1,0 +1,101 @@
+{
+  "name": "Operators Vault – Newsletter Backfill",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Newsletter sources to backfill\n// Each entry: { source, labelId, senders[] }\nconst SOURCES = [\n  { source: 'nik_sharma', author: 'Nik Sharma', labelId: 'Label_422580267025539773', query: 'from:niksharma@workweek.com' },\n  { source: 'taylor_holiday', author: 'Taylor Holiday / CTC', labelId: 'Label_527847910175146065', query: 'from:taylorholiday@commonthreadco.com' },\n  { source: 'matt_bertulli', author: 'Matt Bertulli', labelId: 'Label_529153241593133290', query: 'from:m@mattbertulli.com' },\n  { source: 'chase_dimond', author: 'Chase Dimond', labelId: null, query: 'from:chase@chasedimond.com OR from:ecomemailmarketer@mail.beehiiv.com' },\n  { source: 'operators_newsletter', author: 'Operators Newsletter', labelId: 'Label_4710583513291043383', query: 'from:news@operatorscontent.com' },\n];\n\nreturn SOURCES.map(s => ({ json: s }));"
+      },
+      "id": "sources",
+      "name": "Source Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "getAll",
+        "returnAll": true,
+        "filters": {
+          "q": "={{ $json.query }}"
+        },
+        "options": {}
+      },
+      "id": "gmail_fetch",
+      "name": "Fetch Gmail Messages",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2,
+      "position": [650, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract body text from Gmail message\nconst msg = $json;\nconst source = $('Source Config').first().json;\n\n// Get plain text body\nlet bodyText = '';\nlet bodyHtml = '';\n\nif (msg.payload) {\n  const payload = msg.payload;\n  \n  // Check direct body\n  if (payload.body && payload.body.data) {\n    const decoded = Buffer.from(payload.body.data, 'base64').toString('utf-8');\n    if (payload.mimeType === 'text/html') bodyHtml = decoded;\n    else bodyText = decoded;\n  }\n  \n  // Check parts\n  const parts = payload.parts || [];\n  for (const part of parts) {\n    if (part.body && part.body.data) {\n      const decoded = Buffer.from(part.body.data, 'base64').toString('utf-8');\n      if (part.mimeType === 'text/plain' && !bodyText) bodyText = decoded;\n      if (part.mimeType === 'text/html' && !bodyHtml) bodyHtml = decoded;\n    }\n    // Nested parts\n    const subparts = part.parts || [];\n    for (const sp of subparts) {\n      if (sp.body && sp.body.data) {\n        const decoded = Buffer.from(sp.body.data, 'base64').toString('utf-8');\n        if (sp.mimeType === 'text/plain' && !bodyText) bodyText = decoded;\n        if (sp.mimeType === 'text/html' && !bodyHtml) bodyHtml = decoded;\n      }\n    }\n  }\n}\n\n// Extract headers\nconst headers = {};\nconst rawHeaders = (msg.payload && msg.payload.headers) || msg.headers || [];\nfor (const h of rawHeaders) {\n  headers[h.name.toLowerCase()] = h.value;\n}\n\nreturn [{\n  json: {\n    email_id: msg.id || msg.messageId,\n    source: source.source,\n    author: source.author,\n    subject: headers['subject'] || '',\n    published_at: headers['date'] ? new Date(headers['date']).toISOString() : null,\n    sender_email: headers['from'] || '',\n    body_html: bodyHtml,\n    body_text: bodyText,\n  }\n}];"
+      },
+      "id": "parse_body",
+      "name": "Parse Email Body",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [850, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://superb-smile-production.up.railway.app/ingest-newsletter",
+        "sendBody": true,
+        "bodyContentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "post_railway",
+      "name": "POST to Railway",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const result = $json;\nconsole.log(`email_id=${result.email_id} status=${result.status} insights=${result.insights_count || 0}`);\nreturn [{ json: result }];"
+      },
+      "id": "log",
+      "name": "Log Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Source Config", "type": "main", "index": 0 }]]
+    },
+    "Source Config": {
+      "main": [[{ "node": "Fetch Gmail Messages", "type": "main", "index": 0 }]]
+    },
+    "Fetch Gmail Messages": {
+      "main": [[{ "node": "Parse Email Body", "type": "main", "index": 0 }]]
+    },
+    "Parse Email Body": {
+      "main": [[{ "node": "POST to Railway", "type": "main", "index": 0 }]]
+    },
+    "POST to Railway": {
+      "main": [[{ "node": "Log Result", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

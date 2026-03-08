@@ -1635,4 +1635,171 @@ def root():
         "backfill": "POST /backfill (optional multipart CSVs; or none to run from seed_links in DB; 202 + job)",
         "jobs_list": "GET /jobs (?status=running|done|error)",
         "jobs_detail": "GET /jobs/{job_id}",
+        "ingest_newsletter": "POST /ingest-newsletter — ingest one email from n8n (body: email_id, source, author, subject, published_at, body_html, body_text)",
+        "newsletters": "GET /newsletters — list newsletters (?source=, ?processed=, ?limit=)",
+        "newsletter_insights": "GET /newsletter-insights — search insights (?q=, ?source=, ?category=, ?limit=)",
+        "newsletter_sources": "GET /newsletter-sources — list configured sources",
     }
+
+
+# ── Newsletter endpoints ───────────────────────────────────────────────────────
+
+class NewsletterIngestRequest(BaseModel):
+    email_id: str
+    source: str                       # nik_sharma | taylor_holiday | matt_bertulli | chase_dimond | operators_newsletter
+    author: str = ""
+    subject: str = ""
+    published_at: str | None = None   # ISO8601
+    body_html: str = ""
+    body_text: str = ""
+    sender_email: str = ""            # fallback: infer source from sender
+
+
+@app.post("/ingest-newsletter")
+def ingest_newsletter(req: NewsletterIngestRequest):
+    """
+    Ingest one newsletter email. Called by n8n Gmail trigger.
+    Strips HTML, extracts insights via Claude, stores in Supabase.
+    Returns {email_id, newsletter_id, is_new, insights_count, status}.
+    """
+    from newsletter_ingestor import ingest_email, infer_source_from_sender, NEWSLETTER_SOURCES
+
+    source = req.source
+    # Auto-detect source from sender if not explicitly set or if "unknown"
+    if (not source or source == "unknown") and req.sender_email:
+        inferred = infer_source_from_sender(req.sender_email)
+        if inferred:
+            source = inferred
+
+    if source not in NEWSLETTER_SOURCES and source != "unknown":
+        raise HTTPException(status_code=400, detail=f"Unknown source '{source}'. Valid: {list(NEWSLETTER_SOURCES.keys())}")
+
+    author = req.author or (NEWSLETTER_SOURCES.get(source, {}).get("author", source))
+
+    try:
+        result = ingest_email(
+            email_id=req.email_id,
+            source=source,
+            author=author,
+            subject=req.subject,
+            published_at=req.published_at,
+            body_html=req.body_html,
+            body_text=req.body_text,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ingestion failed: {e!s}")
+
+
+@app.get("/newsletters")
+def list_newsletters(
+    source: str | None = None,
+    processed: bool | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """List newsletters. Filter by source and/or processed status."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    try:
+        conn = psycopg2.connect(db_url, connect_timeout=15)
+        cur = conn.cursor()
+        try:
+            where = []
+            params: list = []
+            if source:
+                where.append("source = %s")
+                params.append(source)
+            if processed is not None:
+                where.append("processed = %s")
+                params.append(processed)
+            where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+            params.extend([limit, offset])
+            cur.execute(
+                f"""
+                SELECT id, email_id, source, author, subject, published_at, processed, created_at,
+                       length(body_text) AS body_len
+                FROM newsletters
+                {where_sql}
+                ORDER BY published_at DESC NULLS LAST
+                LIMIT %s OFFSET %s
+                """,
+                params,
+            )
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            for r in rows:
+                if r.get("published_at"):
+                    r["published_at"] = r["published_at"].isoformat()
+                if r.get("created_at"):
+                    r["created_at"] = r["created_at"].isoformat()
+            return {"newsletters": rows, "count": len(rows), "offset": offset}
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/newsletter-insights")
+def list_newsletter_insights(
+    q: str | None = None,
+    source: str | None = None,
+    category: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Search newsletter insights via Postgres FTS. Filter by source and/or category."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    try:
+        conn = psycopg2.connect(db_url, connect_timeout=15)
+        cur = conn.cursor()
+        try:
+            where = []
+            params: list = []
+            if q:
+                where.append("to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')) @@ plainto_tsquery('english', %s)")
+                params.append(q)
+            if source:
+                where.append("ni.source = %s")
+                params.append(source)
+            if category:
+                where.append("ni.category ILIKE %s")
+                params.append(f"%{category}%")
+            where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+            params.extend([limit, offset])
+            cur.execute(
+                f"""
+                SELECT ni.id, ni.source, ni.category, ni.title, ni.description,
+                       n.subject, n.author, n.published_at
+                FROM newsletter_insights ni
+                JOIN newsletters n ON n.id = ni.newsletter_id
+                {where_sql}
+                ORDER BY n.published_at DESC NULLS LAST
+                LIMIT %s OFFSET %s
+                """,
+                params,
+            )
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+            for r in rows:
+                if r.get("published_at"):
+                    r["published_at"] = r["published_at"].isoformat()
+            return {"insights": rows, "count": len(rows)}
+        finally:
+            cur.close()
+            conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/newsletter-sources")
+def newsletter_sources():
+    """List all configured newsletter sources."""
+    from newsletter_ingestor import NEWSLETTER_SOURCES
+    return {"sources": NEWSLETTER_SOURCES}
