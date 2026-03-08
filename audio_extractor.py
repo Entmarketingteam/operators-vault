@@ -214,6 +214,7 @@ def download_audio(
 
     cmd = base_cmd + [
         "-v",
+        "--extractor-args", "youtube:player_client=android_vr",  # works without proxy/cookies
         "-f", "bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio",
         "--extract-audio",
         "--audio-format", "m4a",
