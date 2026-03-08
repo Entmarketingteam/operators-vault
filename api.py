@@ -79,6 +79,21 @@ def _on_startup():
     })
     # Mark any stale running jobs as failed (from a previous container instance)
     _mark_stale_jobs_failed()
+    # Auto-start newsletter workers and re-queue any unprocessed newsletters
+    _ensure_newsletter_worker()
+    try:
+        from newsletter_ingestor import _db_conn
+        conn = _db_conn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, source, body_text FROM newsletters WHERE processed = FALSE AND body_text IS NOT NULL LIMIT 500")
+            rows = cur.fetchall()
+        conn.close()
+        for row in rows:
+            _newsletter_extract_queue.put((str(row[0]), row[1], row[2]))
+        if rows:
+            _log.info("newsletter_requeue_on_startup", extra={"count": len(rows)})
+    except Exception as e:
+        _log.warning("newsletter_requeue_failed", extra={"error": str(e)})
 
 
 @app.on_event("shutdown")
@@ -1648,6 +1663,7 @@ def root():
 import queue as _queue
 _newsletter_extract_queue: _queue.Queue = _queue.Queue()
 _newsletter_worker_started = False
+_NEWSLETTER_WORKERS = 4  # parallel Claude extraction threads
 
 def _newsletter_extract_worker():
     """Background thread: pick up newsletter_ids and run Claude extraction."""
@@ -1678,8 +1694,9 @@ def _newsletter_extract_worker():
 def _ensure_newsletter_worker():
     global _newsletter_worker_started
     if not _newsletter_worker_started:
-        t = threading.Thread(target=_newsletter_extract_worker, daemon=True, name="newsletter-extractor")
-        t.start()
+        for i in range(_NEWSLETTER_WORKERS):
+            t = threading.Thread(target=_newsletter_extract_worker, daemon=True, name=f"newsletter-extractor-{i}")
+            t.start()
         _newsletter_worker_started = True
 
 
