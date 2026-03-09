@@ -10,6 +10,7 @@ from __future__ import annotations
 import html
 import os
 import re
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -125,7 +126,22 @@ def extract_newsletter_insights(text: str) -> list[dict[str, str]]:
 
 # ── Supabase storage ───────────────────────────────────────────────────────────
 
+_pool = None
+_pool_lock = threading.Lock()
+
+def _get_pool():
+    global _pool
+    if _pool is None:
+        with _pool_lock:
+            if _pool is None:
+                import psycopg2.pool
+                url = os.environ.get("DATABASE_URL", "")
+                _pool = psycopg2.pool.ThreadedConnectionPool(2, 10, url, sslmode="require")
+    return _pool
+
+
 def _db_conn():
+    """Return a connection from the pool (caller must call pool.putconn when done)."""
     import psycopg2
     url = os.environ.get("DATABASE_URL", "")
     return psycopg2.connect(url, sslmode="require")
@@ -143,7 +159,8 @@ def upsert_newsletter(
     Insert newsletter row. Returns (newsletter_id, is_new).
     Skips if already processed.
     """
-    conn = _db_conn()
+    pool = _get_pool()
+    conn = pool.getconn()
     try:
         with conn.cursor() as cur:
             # Check existing
@@ -164,14 +181,15 @@ def upsert_newsletter(
             conn.commit()
             return nl_id, True
     finally:
-        conn.close()
+        pool.putconn(conn)
 
 
 def store_newsletter_insights(newsletter_id: str, source: str, insights: list[dict]) -> int:
     """Insert extracted insights. Returns count inserted."""
     if not insights:
         return 0
-    conn = _db_conn()
+    pool = _get_pool()
+    conn = pool.getconn()
     try:
         with conn.cursor() as cur:
             for ins in insights:
@@ -193,7 +211,7 @@ def store_newsletter_insights(newsletter_id: str, source: str, insights: list[di
             conn.commit()
         return len(insights)
     finally:
-        conn.close()
+        pool.putconn(conn)
 
 
 # ── Main entry point ───────────────────────────────────────────────────────────
