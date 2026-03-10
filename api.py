@@ -1231,10 +1231,17 @@ def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
     try:
         cur.execute(
             """
-            SELECT id, slug, name, bio, twitter_handle, linkedin_url, photo_url,
-                   company, title, website, source, created_at, updated_at
-            FROM speaker_profiles
-            ORDER BY name
+            SELECT sp.id, sp.slug, sp.name, sp.bio, sp.twitter_handle, sp.linkedin_url,
+                   sp.photo_url, sp.company, sp.title, sp.website, sp.source,
+                   sp.created_at, sp.updated_at,
+                   COUNT(DISTINCT ip.insight_id) AS insight_count
+            FROM speaker_profiles sp
+            LEFT JOIN people p ON LOWER(p.name) = LOWER(sp.name) OR p.slug = sp.slug
+            LEFT JOIN insight_people ip ON ip.person_id = p.id
+            GROUP BY sp.id, sp.slug, sp.name, sp.bio, sp.twitter_handle, sp.linkedin_url,
+                     sp.photo_url, sp.company, sp.title, sp.website, sp.source,
+                     sp.created_at, sp.updated_at
+            ORDER BY insight_count DESC, sp.name
             LIMIT %s OFFSET %s
             """,
             (limit, offset),
@@ -1257,6 +1264,7 @@ def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
                 "source": r[10],
                 "created_at": r[11].isoformat() if r[11] else None,
                 "updated_at": r[12].isoformat() if r[12] else None,
+                "insight_count": int(r[13]),
             }
             for r in rows
         ]
