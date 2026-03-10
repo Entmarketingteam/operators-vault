@@ -120,7 +120,7 @@ def extract_newsletter_insights(text: str) -> list[dict[str, str]]:
         return []
     user = tpl.replace("{transcript}", text)
     system = "You are an expert DTC and eCommerce operator analyst. Follow the instructions exactly."
-    raw = _anthropic_message(system, user)
+    raw = _anthropic_message(system, user, model="claude-haiku-4-5-20251001")
     return parse_extract_insights_output(raw)
 
 
