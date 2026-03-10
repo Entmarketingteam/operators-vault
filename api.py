@@ -540,7 +540,7 @@ def _do_extract_insights_from_transcripts(job_id: str | None = None, limit: int 
                 start_sec, end_sec = extract_timestamps(timestamped, desc or title, prompt_set="operators")
                 framework = make_framework(title or "Framework", it.get("_chunk", ""), prompt_set="operators")
                 cur2.execute(
-                    """INSERT INTO insights (video_id, podcast, category, title, description, start_time_sec, end_time_sec, framework)
+                    """INSERT INTO insights (video_id, podcast, category, title, description, start_time_sec, end_time_sec, framework_markdown)
                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
                     (video_id, podcast, cat, title, desc, start_sec, end_sec, framework),
                 )
