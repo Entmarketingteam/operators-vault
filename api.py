@@ -459,6 +459,148 @@ def process_new():
     return _do_process_new()
 
 
+def _do_extract_insights_from_transcripts(job_id: str | None = None, limit: int = 300) -> dict:
+    """
+    For every video that has a transcription but no insights, run insight extraction
+    using the stored transcript (no re-download, no Deepgram). Much faster than process-new.
+    """
+    import concurrent.futures
+    import psycopg2
+    from insight_extractor import extract_insights, extract_timestamps, generate_title, make_framework
+
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=500, detail="DATABASE_URL not set")
+
+    conn = psycopg2.connect(db_url)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT v.video_id, v.podcast, t.raw_text
+        FROM videos v
+        JOIN transcriptions t ON t.video_id = v.video_id
+        WHERE v.video_id NOT IN (SELECT DISTINCT video_id FROM insights WHERE video_id IS NOT NULL)
+        ORDER BY v.published_at DESC NULLS LAST
+        LIMIT %s
+    """, (limit,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    _log.info("extract-insights-backfill: %d videos need insight extraction", len(rows))
+    if job_id:
+        _update_job_heartbeat(job_id, progress=f"0/{len(rows)} videos queued")
+
+    processed = []
+    errors = []
+    done_count = 0
+    lock = threading.Lock()
+
+    def _extract_one(args):
+        nonlocal done_count
+        video_id, podcast, raw_text = args
+        if _shutting_down.is_set():
+            return video_id, False, "shutdown"
+        try:
+            from company_extractor import extract_companies_from_text, link_insights_to_companies, link_video_to_companies
+            from people_extractor import extract_people_from_segments, link_insights_to_people
+
+            db = os.environ["DATABASE_URL"]
+            conn2 = psycopg2.connect(db)
+            cur2 = conn2.cursor()
+
+            # Extract people from segments (already stored from prior transcription)
+            speaker_to_id = extract_people_from_segments(cur2, video_id)
+
+            # Chunk transcript and extract insights
+            chunks = [raw_text[i:i+6000] for i in range(0, len(raw_text), 5500)]
+            all_insights: list[dict] = []
+            for ch in chunks:
+                items = extract_insights(ch, prompt_set="operators")
+                for it in items:
+                    it["_chunk"] = ch
+                    all_insights.append(it)
+
+            # Clear old insights (safety) and insert new ones
+            cur2.execute("DELETE FROM insights WHERE video_id = %s", (video_id,))
+
+            # Load segments for timestamp lookup
+            cur2.execute("SELECT start_time_sec, end_time_sec, text FROM segments s JOIN transcriptions t ON t.id = s.transcription_id WHERE t.video_id = %s ORDER BY start_time_sec", (video_id,))
+            segs = cur2.fetchall()
+            timestamped = "\n".join(f"[{r[0]:.1f}s] {r[2]}" for r in segs) if segs else raw_text
+
+            insight_ids: list[str] = []
+            for it in all_insights:
+                cat = it.get("category") or ""
+                title = (it.get("title") or "").strip()
+                desc = (it.get("description") or "").strip()
+                if len(title) < 3:
+                    title = generate_title(desc or title, prompt_set="operators")
+                elif len(title) > 120:
+                    title = generate_title(desc or title, prompt_set="operators")
+                start_sec, end_sec = extract_timestamps(timestamped, desc or title, prompt_set="operators")
+                framework = make_framework(it, prompt_set="operators")
+                cur2.execute(
+                    """INSERT INTO insights (video_id, podcast, category, title, description, start_time_sec, end_time_sec, framework)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                    (video_id, podcast, cat, title, desc, start_sec, end_sec, framework),
+                )
+                iid = cur2.fetchone()[0]
+                insight_ids.append(str(iid))
+
+            # Link people + companies
+            link_insights_to_people(cur2, insight_ids, speaker_to_id)
+            companies = extract_companies_from_text(raw_text)
+            link_video_to_companies(cur2, video_id, companies)
+            link_insights_to_companies(cur2, insight_ids, companies)
+
+            conn2.commit()
+            cur2.close()
+            conn2.close()
+
+            with lock:
+                done_count += 1
+                if job_id:
+                    _update_job_heartbeat(job_id, progress=f"{done_count}/{len(rows)}: {video_id} ({len(insight_ids)} insights)")
+            _log.info("extract-backfill ok: %s → %d insights", video_id, len(insight_ids))
+            return video_id, True, None
+        except Exception as e:
+            _log.warning("extract-backfill error: %s — %s", video_id, e)
+            return video_id, False, str(e)
+
+    workers = int(os.environ.get("PROCESS_NEW_WORKERS", "4"))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        for video_id, ok, err in pool.map(_extract_one, rows):
+            if ok:
+                processed.append(video_id)
+            else:
+                errors.append({"video_id": video_id, "error": err})
+
+    return {"ok": True, "processed": len(processed), "errors": len(errors), "video_ids": processed, "error_details": errors[:5]}
+
+
+@app.post("/extract-insights-backfill")
+def extract_insights_backfill(limit: int = 300):
+    """
+    Extract insights for all transcribed-but-no-insights videos without re-downloading audio.
+    Much faster than /process-new. Safe to call multiple times (idempotent).
+    """
+    return _do_extract_insights_from_transcripts(limit=limit)
+
+
+@app.post("/extract-insights-backfill/async")
+def extract_insights_backfill_async(limit: int = 300):
+    """Async wrapper for /extract-insights-backfill. Returns job_id immediately."""
+    job_id = _create_job("extract-insights-backfill")
+    def _run():
+        try:
+            result = _do_extract_insights_from_transcripts(job_id=job_id, limit=limit)
+            _finish_job(job_id, result)
+        except Exception as e:
+            _fail_job(job_id, str(e))
+    threading.Thread(target=_run, daemon=True).start()
+    return {"job_id": job_id, "status": "running", "jobs": f"/jobs/{job_id}"}
+
+
 @app.post("/run-migrate-phase1")
 def run_migrate_phase1():
     """Run sql/migrate_phase1_youtube_titans.sql (add view_count, thumbnail_url, etc.). Safe to call multiple times."""
