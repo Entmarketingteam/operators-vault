@@ -72,29 +72,30 @@ app.mount("/static", StaticFiles(directory=str(_root / "static")), name="static"
 # Startup / Shutdown lifecycle
 # ---------------------------------------------------------------------------
 def _run_startup_migration() -> None:
-    """Run add_channel_configs.sql on startup if the tables don't exist yet. Idempotent."""
+    """Run add_channel_configs.sql and add_speaker_profiles.sql on startup. Idempotent."""
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         return
-    migration_path = _root / "sql" / "add_channel_configs.sql"
-    if not migration_path.exists():
-        _log.warning("startup_migration_missing", extra={"path": str(migration_path)})
-        return
-    try:
-        import psycopg2
-        conn = psycopg2.connect(db_url)
-        conn.autocommit = True
-        with conn.cursor() as cur:
-            sql = migration_path.read_text(encoding="utf-8")
-            # Execute each statement separated by semicolons, skip blank/comment-only
-            for stmt in sql.split(";"):
-                stmt = stmt.strip()
-                if stmt and not stmt.startswith("--"):
-                    cur.execute(stmt)
-        conn.close()
-        _log.info("startup_migration_ok", extra={"file": "add_channel_configs.sql"})
-    except Exception as e:
-        _log.warning("startup_migration_failed", extra={"error": str(e)})
+    import psycopg2
+    for migration_name in ("add_channel_configs.sql", "add_speaker_profiles.sql"):
+        migration_path = _root / "sql" / migration_name
+        if not migration_path.exists():
+            _log.warning("startup_migration_missing", extra={"path": str(migration_path)})
+            continue
+        try:
+            conn = psycopg2.connect(db_url)
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                sql = migration_path.read_text(encoding="utf-8")
+                # Execute each statement separated by semicolons, skip blank/comment-only
+                for stmt in sql.split(";"):
+                    stmt = stmt.strip()
+                    if stmt and not stmt.startswith("--"):
+                        cur.execute(stmt)
+            conn.close()
+            _log.info("startup_migration_ok", extra={"file": migration_name})
+        except Exception as e:
+            _log.warning("startup_migration_failed", extra={"file": migration_name, "error": str(e)})
 
 
 @app.on_event("startup")
@@ -1200,6 +1201,213 @@ def insights_list(
     """List insights by category/podcast (for Listen pages). Requires Bearer token."""
     return _list_insights(category=category, podcast=podcast, limit=limit)
 
+
+# ---------------------------------------------------------------------------
+# Speaker Profiles (public — no JWT required)
+# ---------------------------------------------------------------------------
+
+class SpeakerUpsertRequest(BaseModel):
+    slug: str
+    name: str
+    bio: str | None = None
+    twitter_handle: str | None = None
+    photo_url: str | None = None
+    company: str | None = None
+    title: str | None = None
+    linkedin_url: str | None = None
+    website: str | None = None
+    source: str = "manual"
+
+
+def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
+    """List all speaker profiles."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    limit = min(limit, 200)
+    conn = psycopg2.connect(db_url, connect_timeout=10)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT id, slug, name, bio, twitter_handle, linkedin_url, photo_url,
+                   company, title, website, source, created_at, updated_at
+            FROM speaker_profiles
+            ORDER BY name
+            LIMIT %s OFFSET %s
+            """,
+            (limit, offset),
+        )
+        rows = cur.fetchall()
+        cur.execute("SELECT COUNT(*) FROM speaker_profiles")
+        total = cur.fetchone()[0]
+        speakers = [
+            {
+                "id": str(r[0]),
+                "slug": r[1],
+                "name": r[2],
+                "bio": r[3],
+                "twitter_handle": r[4],
+                "linkedin_url": r[5],
+                "photo_url": r[6],
+                "company": r[7],
+                "title": r[8],
+                "website": r[9],
+                "source": r[10],
+                "created_at": r[11].isoformat() if r[11] else None,
+                "updated_at": r[12].isoformat() if r[12] else None,
+            }
+            for r in rows
+        ]
+        return {"speakers": speakers, "total": total, "limit": limit, "offset": offset}
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _get_speaker_by_slug(slug: str) -> dict:
+    """Get a speaker profile with their top insights."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    conn = psycopg2.connect(db_url, connect_timeout=10)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT id, slug, name, bio, twitter_handle, linkedin_url, photo_url,
+                   company, title, website, source, created_at, updated_at
+            FROM speaker_profiles
+            WHERE slug = %s
+            """,
+            (slug,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Speaker not found")
+        speaker = {
+            "id": str(row[0]),
+            "slug": row[1],
+            "name": row[2],
+            "bio": row[3],
+            "twitter_handle": row[4],
+            "linkedin_url": row[5],
+            "photo_url": row[6],
+            "company": row[7],
+            "title": row[8],
+            "website": row[9],
+            "source": row[10],
+            "created_at": row[11].isoformat() if row[11] else None,
+            "updated_at": row[12].isoformat() if row[12] else None,
+        }
+        # Join with insights via people table (match on name/slug)
+        cur.execute(
+            """
+            SELECT i.id, i.video_id, i.podcast, i.category, i.title, i.description, i.start_time_sec
+            FROM insights i
+            JOIN insight_people ip ON ip.insight_id = i.id
+            JOIN people p ON p.id = ip.person_id
+            WHERE (p.slug = %s OR LOWER(p.name) = LOWER(%s))
+            ORDER BY i.created_at DESC
+            LIMIT 20
+            """,
+            (slug, row[2]),
+        )
+        insights = [
+            {
+                "id": str(r[0]),
+                "video_id": r[1],
+                "podcast": r[2],
+                "category": r[3],
+                "title": r[4],
+                "description": r[5],
+                "start_time_sec": float(r[6]) if r[6] is not None else None,
+            }
+            for r in cur.fetchall()
+        ]
+        speaker["insights"] = insights
+        return speaker
+    finally:
+        cur.close()
+        conn.close()
+
+
+def _upsert_speaker(data: SpeakerUpsertRequest) -> dict:
+    """Upsert a speaker profile."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    conn = psycopg2.connect(db_url, connect_timeout=10)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            """
+            INSERT INTO speaker_profiles
+                (slug, name, bio, twitter_handle, linkedin_url, photo_url, company, title, website, source)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (slug) DO UPDATE SET
+                name = EXCLUDED.name,
+                bio = COALESCE(EXCLUDED.bio, speaker_profiles.bio),
+                twitter_handle = COALESCE(EXCLUDED.twitter_handle, speaker_profiles.twitter_handle),
+                linkedin_url = COALESCE(EXCLUDED.linkedin_url, speaker_profiles.linkedin_url),
+                photo_url = COALESCE(EXCLUDED.photo_url, speaker_profiles.photo_url),
+                company = COALESCE(EXCLUDED.company, speaker_profiles.company),
+                title = COALESCE(EXCLUDED.title, speaker_profiles.title),
+                website = COALESCE(EXCLUDED.website, speaker_profiles.website),
+                source = EXCLUDED.source,
+                updated_at = NOW()
+            RETURNING id, slug, name, source, updated_at
+            """,
+            (
+                data.slug,
+                data.name,
+                data.bio,
+                data.twitter_handle,
+                data.linkedin_url,
+                data.photo_url,
+                data.company,
+                data.title,
+                data.website,
+                data.source,
+            ),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return {
+            "ok": True,
+            "id": str(row[0]),
+            "slug": row[1],
+            "name": row[2],
+            "source": row[3],
+            "updated_at": row[4].isoformat() if row[4] else None,
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/speakers")
+def speakers_list(limit: int = 50, offset: int = 0):
+    """List all speaker profiles. Public — no auth required. Params: limit (max 200), offset."""
+    return _list_speakers(limit=limit, offset=offset)
+
+
+@app.get("/speakers/{slug}")
+def speaker_detail(slug: str):
+    """Get a single speaker profile with their top insights. Public — no auth required."""
+    return _get_speaker_by_slug(slug)
+
+
+@app.post("/speakers")
+def speaker_upsert(body: SpeakerUpsertRequest):
+    """Upsert a speaker profile. Public — no auth required. Body: {slug, name, bio?, twitter_handle?, photo_url?, company?, title?}."""
+    return _upsert_speaker(body)
+
+
+# ---------------------------------------------------------------------------
 
 class ChatRequest(BaseModel):
     message: str
