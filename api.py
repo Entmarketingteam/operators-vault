@@ -1229,35 +1229,70 @@ def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     limit = min(limit, 200)
     conn = psycopg2.connect(db_url, connect_timeout=10)
-    conn.autocommit = True
     cur = conn.cursor()
     try:
-        # Ensure host columns exist (idempotent — safe to run every time)
-        cur.execute("ALTER TABLE speaker_profiles ADD COLUMN IF NOT EXISTS is_host BOOLEAN DEFAULT FALSE")
-        cur.execute("ALTER TABLE speaker_profiles ADD COLUMN IF NOT EXISTS host_podcast TEXT")
-    except Exception:
-        pass
-    conn.autocommit = False
-    try:
-        cur.execute(
-            """
-            SELECT sp.id, sp.slug, sp.name, sp.bio, sp.twitter_handle, sp.linkedin_url,
-                   sp.photo_url, sp.company, sp.title, sp.website, sp.source,
-                   sp.created_at, sp.updated_at,
-                   COUNT(DISTINCT ip.insight_id) AS insight_count,
-                   COALESCE(sp.is_host, FALSE) AS is_host,
-                   sp.host_podcast
-            FROM speaker_profiles sp
-            LEFT JOIN people p ON LOWER(p.name) = LOWER(sp.name) OR p.slug = sp.slug
-            LEFT JOIN insight_people ip ON ip.person_id = p.id
-            GROUP BY sp.id, sp.slug, sp.name, sp.bio, sp.twitter_handle, sp.linkedin_url,
-                     sp.photo_url, sp.company, sp.title, sp.website, sp.source,
-                     sp.created_at, sp.updated_at, sp.is_host, sp.host_podcast
-            ORDER BY COALESCE(sp.is_host, FALSE) DESC, insight_count DESC, sp.name
-            LIMIT %s OFFSET %s
-            """,
-            (limit, offset),
-        )
+        # Check which host columns exist (avoids DDL permission issues)
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'speaker_profiles' AND column_name IN ('is_host', 'host_podcast')
+        """)
+        existing_cols = {r[0] for r in cur.fetchall()}
+        has_host_cols = "is_host" in existing_cols and "host_podcast" in existing_cols
+
+        # Try to add missing columns if needed
+        if not has_host_cols:
+            conn.rollback()
+            try:
+                conn.autocommit = True
+                if "is_host" not in existing_cols:
+                    cur.execute("ALTER TABLE speaker_profiles ADD COLUMN IF NOT EXISTS is_host BOOLEAN DEFAULT FALSE")
+                if "host_podcast" not in existing_cols:
+                    cur.execute("ALTER TABLE speaker_profiles ADD COLUMN IF NOT EXISTS host_podcast TEXT")
+                has_host_cols = True
+            except Exception as e:
+                _log.warning("add_host_cols_failed", extra={"error": str(e)})
+            finally:
+                conn.autocommit = False
+
+        if has_host_cols:
+            cur.execute(
+                """
+                SELECT sp.id, sp.slug, sp.name, sp.bio, sp.twitter_handle, sp.linkedin_url,
+                       sp.photo_url, sp.company, sp.title, sp.website, sp.source,
+                       sp.created_at, sp.updated_at,
+                       COUNT(DISTINCT ip.insight_id) AS insight_count,
+                       COALESCE(sp.is_host, FALSE) AS is_host,
+                       sp.host_podcast
+                FROM speaker_profiles sp
+                LEFT JOIN people p ON LOWER(p.name) = LOWER(sp.name) OR p.slug = sp.slug
+                LEFT JOIN insight_people ip ON ip.person_id = p.id
+                GROUP BY sp.id, sp.slug, sp.name, sp.bio, sp.twitter_handle, sp.linkedin_url,
+                         sp.photo_url, sp.company, sp.title, sp.website, sp.source,
+                         sp.created_at, sp.updated_at, sp.is_host, sp.host_podcast
+                ORDER BY COALESCE(sp.is_host, FALSE) DESC, insight_count DESC, sp.name
+                LIMIT %s OFFSET %s
+                """,
+                (limit, offset),
+            )
+        else:
+            # Fallback: columns don't exist yet, query without them
+            cur.execute(
+                """
+                SELECT sp.id, sp.slug, sp.name, sp.bio, sp.twitter_handle, sp.linkedin_url,
+                       sp.photo_url, sp.company, sp.title, sp.website, sp.source,
+                       sp.created_at, sp.updated_at,
+                       COUNT(DISTINCT ip.insight_id) AS insight_count
+                FROM speaker_profiles sp
+                LEFT JOIN people p ON LOWER(p.name) = LOWER(sp.name) OR p.slug = sp.slug
+                LEFT JOIN insight_people ip ON ip.person_id = p.id
+                GROUP BY sp.id, sp.slug, sp.name, sp.bio, sp.twitter_handle, sp.linkedin_url,
+                         sp.photo_url, sp.company, sp.title, sp.website, sp.source,
+                         sp.created_at, sp.updated_at
+                ORDER BY insight_count DESC, sp.name
+                LIMIT %s OFFSET %s
+                """,
+                (limit, offset),
+            )
         rows = cur.fetchall()
         cur.execute("SELECT COUNT(*) FROM speaker_profiles")
         total = cur.fetchone()[0]
@@ -1277,8 +1312,8 @@ def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
                 "created_at": r[11].isoformat() if r[11] else None,
                 "updated_at": r[12].isoformat() if r[12] else None,
                 "insight_count": int(r[13]),
-                "is_host": bool(r[14]),
-                "host_podcast": r[15],
+                "is_host": bool(r[14]) if has_host_cols else False,
+                "host_podcast": r[15] if has_host_cols else None,
             }
             for r in rows
         ]
@@ -1297,16 +1332,35 @@ def _get_speaker_by_slug(slug: str) -> dict:
     conn = psycopg2.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
-        cur.execute(
-            """
-            SELECT id, slug, name, bio, twitter_handle, linkedin_url, photo_url,
-                   company, title, website, source, created_at, updated_at,
-                   COALESCE(is_host, FALSE), host_podcast
-            FROM speaker_profiles
-            WHERE slug = %s
-            """,
-            (slug,),
-        )
+        # Check which host columns exist
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'speaker_profiles' AND column_name IN ('is_host', 'host_podcast')
+        """)
+        existing_cols = {r[0] for r in cur.fetchall()}
+        has_host_cols = "is_host" in existing_cols and "host_podcast" in existing_cols
+
+        if has_host_cols:
+            cur.execute(
+                """
+                SELECT id, slug, name, bio, twitter_handle, linkedin_url, photo_url,
+                       company, title, website, source, created_at, updated_at,
+                       COALESCE(is_host, FALSE), host_podcast
+                FROM speaker_profiles
+                WHERE slug = %s
+                """,
+                (slug,),
+            )
+        else:
+            cur.execute(
+                """
+                SELECT id, slug, name, bio, twitter_handle, linkedin_url, photo_url,
+                       company, title, website, source, created_at, updated_at
+                FROM speaker_profiles
+                WHERE slug = %s
+                """,
+                (slug,),
+            )
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Speaker not found")
@@ -1324,8 +1378,8 @@ def _get_speaker_by_slug(slug: str) -> dict:
             "source": row[10],
             "created_at": row[11].isoformat() if row[11] else None,
             "updated_at": row[12].isoformat() if row[12] else None,
-            "is_host": bool(row[13]),
-            "host_podcast": row[14],
+            "is_host": bool(row[13]) if has_host_cols else False,
+            "host_podcast": row[14] if has_host_cols else None,
         }
         # Join with insights via people table (match on name/slug)
         cur.execute(
@@ -1368,41 +1422,80 @@ def _upsert_speaker(data: SpeakerUpsertRequest) -> dict:
     conn = psycopg2.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
-        cur.execute(
-            """
-            INSERT INTO speaker_profiles
-                (slug, name, bio, twitter_handle, linkedin_url, photo_url, company, title, website, source, is_host, host_podcast)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (slug) DO UPDATE SET
-                name = EXCLUDED.name,
-                bio = COALESCE(EXCLUDED.bio, speaker_profiles.bio),
-                twitter_handle = COALESCE(EXCLUDED.twitter_handle, speaker_profiles.twitter_handle),
-                linkedin_url = COALESCE(EXCLUDED.linkedin_url, speaker_profiles.linkedin_url),
-                photo_url = COALESCE(EXCLUDED.photo_url, speaker_profiles.photo_url),
-                company = COALESCE(EXCLUDED.company, speaker_profiles.company),
-                title = COALESCE(EXCLUDED.title, speaker_profiles.title),
-                website = COALESCE(EXCLUDED.website, speaker_profiles.website),
-                source = EXCLUDED.source,
-                is_host = EXCLUDED.is_host,
-                host_podcast = COALESCE(EXCLUDED.host_podcast, speaker_profiles.host_podcast),
-                updated_at = NOW()
-            RETURNING id, slug, name, source, updated_at
-            """,
-            (
-                data.slug,
-                data.name,
-                data.bio,
-                data.twitter_handle,
-                data.linkedin_url,
-                data.photo_url,
-                data.company,
-                data.title,
-                data.website,
-                data.source,
-                data.is_host,
-                data.host_podcast,
-            ),
-        )
+        # Check which host columns exist
+        cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'speaker_profiles' AND column_name IN ('is_host', 'host_podcast')
+        """)
+        existing_cols = {r[0] for r in cur.fetchall()}
+        has_host_cols = "is_host" in existing_cols and "host_podcast" in existing_cols
+
+        # Try to add missing columns if needed
+        if not has_host_cols:
+            conn.rollback()
+            try:
+                conn.autocommit = True
+                if "is_host" not in existing_cols:
+                    cur.execute("ALTER TABLE speaker_profiles ADD COLUMN IF NOT EXISTS is_host BOOLEAN DEFAULT FALSE")
+                if "host_podcast" not in existing_cols:
+                    cur.execute("ALTER TABLE speaker_profiles ADD COLUMN IF NOT EXISTS host_podcast TEXT")
+                has_host_cols = True
+            except Exception as e:
+                _log.warning("add_host_cols_failed_upsert", extra={"error": str(e)})
+            finally:
+                conn.autocommit = False
+
+        if has_host_cols:
+            cur.execute(
+                """
+                INSERT INTO speaker_profiles
+                    (slug, name, bio, twitter_handle, linkedin_url, photo_url, company, title, website, source, is_host, host_podcast)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (slug) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    bio = COALESCE(EXCLUDED.bio, speaker_profiles.bio),
+                    twitter_handle = COALESCE(EXCLUDED.twitter_handle, speaker_profiles.twitter_handle),
+                    linkedin_url = COALESCE(EXCLUDED.linkedin_url, speaker_profiles.linkedin_url),
+                    photo_url = COALESCE(EXCLUDED.photo_url, speaker_profiles.photo_url),
+                    company = COALESCE(EXCLUDED.company, speaker_profiles.company),
+                    title = COALESCE(EXCLUDED.title, speaker_profiles.title),
+                    website = COALESCE(EXCLUDED.website, speaker_profiles.website),
+                    source = EXCLUDED.source,
+                    is_host = EXCLUDED.is_host,
+                    host_podcast = COALESCE(EXCLUDED.host_podcast, speaker_profiles.host_podcast),
+                    updated_at = NOW()
+                RETURNING id, slug, name, source, updated_at
+                """,
+                (
+                    data.slug, data.name, data.bio, data.twitter_handle, data.linkedin_url,
+                    data.photo_url, data.company, data.title, data.website, data.source,
+                    data.is_host, data.host_podcast,
+                ),
+            )
+        else:
+            cur.execute(
+                """
+                INSERT INTO speaker_profiles
+                    (slug, name, bio, twitter_handle, linkedin_url, photo_url, company, title, website, source)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (slug) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    bio = COALESCE(EXCLUDED.bio, speaker_profiles.bio),
+                    twitter_handle = COALESCE(EXCLUDED.twitter_handle, speaker_profiles.twitter_handle),
+                    linkedin_url = COALESCE(EXCLUDED.linkedin_url, speaker_profiles.linkedin_url),
+                    photo_url = COALESCE(EXCLUDED.photo_url, speaker_profiles.photo_url),
+                    company = COALESCE(EXCLUDED.company, speaker_profiles.company),
+                    title = COALESCE(EXCLUDED.title, speaker_profiles.title),
+                    website = COALESCE(EXCLUDED.website, speaker_profiles.website),
+                    source = EXCLUDED.source,
+                    updated_at = NOW()
+                RETURNING id, slug, name, source, updated_at
+                """,
+                (
+                    data.slug, data.name, data.bio, data.twitter_handle, data.linkedin_url,
+                    data.photo_url, data.company, data.title, data.website, data.source,
+                ),
+            )
         row = cur.fetchone()
         conn.commit()
         return {
