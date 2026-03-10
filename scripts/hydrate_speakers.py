@@ -80,7 +80,7 @@ def _build_profile_with_haiku(client: anthropic.Anthropic, name: str, context: s
 
     try:
         response = client.messages.create(
-            model="claude-haiku-4-5-20250929",
+            model="claude-haiku-4-5-20251001",
             max_tokens=512,
             messages=[{"role": "user", "content": prompt}],
         )
@@ -139,9 +139,9 @@ def main() -> None:
             print(f"[INFO] Found {len(all_people)} people in vault", flush=True)
 
             # Fetch already-hydrated slugs
-            cur.execute("SELECT slug FROM speaker_profiles")
+            cur.execute("SELECT slug FROM speaker_profiles WHERE bio IS NOT NULL AND bio != ''")
             existing_slugs = {r[0] for r in cur.fetchall()}
-            print(f"[INFO] {len(existing_slugs)} already in speaker_profiles", flush=True)
+            print(f"[INFO] {len(existing_slugs)} already hydrated with bios", flush=True)
 
         hydrated = 0
         skipped = 0
