@@ -1529,6 +1529,34 @@ def speaker_upsert(body: SpeakerUpsertRequest):
     return _upsert_speaker(body)
 
 
+@app.post("/admin/migrate-host-fields")
+def admin_migrate_host_fields():
+    """Run the is_host/host_podcast migration directly. No auth required (idempotent DDL)."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    results = []
+    conn = psycopg2.connect(db_url, connect_timeout=10)
+    try:
+        conn.autocommit = True
+        cur = conn.cursor()
+        for stmt in [
+            "ALTER TABLE speaker_profiles ADD COLUMN IF NOT EXISTS is_host BOOLEAN DEFAULT FALSE",
+            "ALTER TABLE speaker_profiles ADD COLUMN IF NOT EXISTS host_podcast TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_speaker_profiles_is_host ON speaker_profiles(is_host) WHERE is_host = TRUE",
+        ]:
+            try:
+                cur.execute(stmt)
+                results.append({"stmt": stmt[:60], "ok": True})
+            except Exception as e:
+                results.append({"stmt": stmt[:60], "ok": False, "error": str(e)})
+        cur.close()
+    finally:
+        conn.close()
+    return {"results": results}
+
+
 # ---------------------------------------------------------------------------
 
 class ChatRequest(BaseModel):
