@@ -26,7 +26,7 @@ except ImportError:
                     os.environ.setdefault(k.strip(), v.strip())
 
 RAILWAY_GRAPHQL = "https://backboard.railway.com/graphql/v2"
-CRON_SCHEDULE = "0 */3 * * *"  # Every 3 hours
+CRON_SCHEDULE = "0 8 * * *"  # Daily at 8am UTC
 TRIGGER_URL_DEFAULT = "https://superb-smile-production.up.railway.app/sync/async"
 
 
