@@ -589,16 +589,11 @@ def extract_insights_backfill(limit: int = 300):
 
 @app.post("/extract-insights-backfill/async")
 def extract_insights_backfill_async(limit: int = 300):
-    """Async wrapper for /extract-insights-backfill. Returns job_id immediately."""
-    job_id = _create_job("extract-insights-backfill")
-    def _run():
-        try:
-            result = _do_extract_insights_from_transcripts(job_id=job_id, limit=limit)
-            _finish_job(job_id, result)
-        except Exception as e:
-            _fail_job(job_id, str(e))
-    threading.Thread(target=_run, daemon=True).start()
-    return {"job_id": job_id, "status": "running", "jobs": f"/jobs/{job_id}"}
+    """Async wrapper for /extract-insights-backfill. Returns 202 with job_id immediately."""
+    import uuid
+    job_id = str(uuid.uuid4())
+    _run_async_job(job_id, lambda: _do_extract_insights_from_transcripts(job_id=job_id, limit=limit), "extract-insights-backfill")
+    return _async_202_response(job_id, "extract-insights-backfill")
 
 
 @app.post("/run-migrate-phase1")
