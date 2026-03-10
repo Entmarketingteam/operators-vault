@@ -17,7 +17,8 @@ from typing import Any
 
 # ── Source config ─────────────────────────────────────────────────────────────
 
-NEWSLETTER_SOURCES = {
+# Hardcoded fallback — used if DB is unavailable or table doesn't exist yet
+_NEWSLETTER_SOURCES_FALLBACK = {
     "nik_sharma": {
         "author": "Nik Sharma",
         "label_id": "Label_422580267025539773",
@@ -44,10 +45,48 @@ NEWSLETTER_SOURCES = {
     },
 }
 
+
+def load_newsletter_sources_from_db() -> dict:
+    """
+    Load newsletter sources from newsletter_source_configs table.
+    Returns a dict keyed by slug with {author, gmail_query, senders} shape.
+    Falls back to _NEWSLETTER_SOURCES_FALLBACK on any error.
+    """
+    try:
+        import psycopg2
+        url = os.environ.get("DATABASE_URL", "")
+        if not url:
+            return _NEWSLETTER_SOURCES_FALLBACK
+        conn = psycopg2.connect(url, sslmode="require")
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT slug, author, gmail_query FROM newsletter_source_configs WHERE active = TRUE ORDER BY created_at"
+            )
+            rows = cur.fetchall()
+        conn.close()
+        if not rows:
+            return _NEWSLETTER_SOURCES_FALLBACK
+        result = {}
+        for slug, author, gmail_query in rows:
+            # Parse senders from gmail_query (extract email addresses)
+            senders = re.findall(r"from:(\S+@\S+\.\S+)", gmail_query)
+            result[slug] = {
+                "author": author,
+                "gmail_query": gmail_query,
+                "senders": senders,
+            }
+        return result
+    except Exception:
+        return _NEWSLETTER_SOURCES_FALLBACK
+
+
+# Load from DB at module import time; falls back to hardcoded if DB unavailable
+NEWSLETTER_SOURCES = load_newsletter_sources_from_db()
+
 # Infer source from sender email
 _SENDER_TO_SOURCE: dict[str, str] = {}
 for _slug, _cfg in NEWSLETTER_SOURCES.items():
-    for _sender in _cfg["senders"]:
+    for _sender in _cfg.get("senders", []):
         _SENDER_TO_SOURCE[_sender.lower()] = _slug
 
 

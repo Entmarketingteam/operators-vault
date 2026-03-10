@@ -227,19 +227,48 @@ def _ensure_video_from_record(cursor, v: dict, min_duration_sec: int = 300) -> b
     return True
 
 
+def _load_channel_configs_from_db() -> dict[str, str]:
+    """
+    Load active channel configs from channel_configs table.
+    Returns {slug: channel_handle} dict.
+    Falls back to DEFAULT_CHANNEL_HANDLES from youtube_client on any error.
+    """
+    from youtube_client import DEFAULT_CHANNEL_HANDLES
+    try:
+        import psycopg2
+        db_url = os.environ.get("DATABASE_URL", "")
+        if not db_url:
+            return dict(DEFAULT_CHANNEL_HANDLES)
+        conn = psycopg2.connect(db_url)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT slug, channel_handle FROM channel_configs WHERE active = TRUE ORDER BY created_at"
+            )
+            rows = cur.fetchall()
+        conn.close()
+        if not rows:
+            return dict(DEFAULT_CHANNEL_HANDLES)
+        return {slug: handle for slug, handle in rows}
+    except Exception as e:
+        _log.warning("channel_configs_load_failed — using hardcoded defaults: %s", e)
+        from youtube_client import DEFAULT_CHANNEL_HANDLES
+        return dict(DEFAULT_CHANNEL_HANDLES)
+
+
 def _fetch_new(cursor, *, max_per_channel: int = 50, min_duration_sec: int = 300) -> int:
-    """Fetch recent videos from YouTube (channels + TITANS playlist) and upsert into videos. Requires YOUTUBE_API_KEY."""
+    """Fetch recent videos from YouTube (channels from DB + TITANS playlist) and upsert into videos. Requires YOUTUBE_API_KEY."""
     from youtube_client import (
         fetch_channel_videos,
         fetch_playlist_videos,
-        get_channel_handle,
         get_playlist_id,
         resolve_channel_id,
     )
 
+    # Load channels from DB (falls back to hardcoded if DB unavailable)
+    channel_map = _load_channel_configs_from_db()
+
     total = 0
-    for podcast in ("9operators", "marketing_operator", "finance_operators"):
-        handle = get_channel_handle(podcast)
+    for podcast, handle in channel_map.items():
         if not handle:
             continue
         cid = resolve_channel_id(handle)

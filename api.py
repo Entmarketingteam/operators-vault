@@ -71,6 +71,32 @@ app.mount("/static", StaticFiles(directory=str(_root / "static")), name="static"
 # ---------------------------------------------------------------------------
 # Startup / Shutdown lifecycle
 # ---------------------------------------------------------------------------
+def _run_startup_migration() -> None:
+    """Run add_channel_configs.sql on startup if the tables don't exist yet. Idempotent."""
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        return
+    migration_path = _root / "sql" / "add_channel_configs.sql"
+    if not migration_path.exists():
+        _log.warning("startup_migration_missing", extra={"path": str(migration_path)})
+        return
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url)
+        conn.autocommit = True
+        with conn.cursor() as cur:
+            sql = migration_path.read_text(encoding="utf-8")
+            # Execute each statement separated by semicolons, skip blank/comment-only
+            for stmt in sql.split(";"):
+                stmt = stmt.strip()
+                if stmt and not stmt.startswith("--"):
+                    cur.execute(stmt)
+        conn.close()
+        _log.info("startup_migration_ok", extra={"file": "add_channel_configs.sql"})
+    except Exception as e:
+        _log.warning("startup_migration_failed", extra={"error": str(e)})
+
+
 @app.on_event("startup")
 def _on_startup():
     _log.info("Container starting", extra={
@@ -78,6 +104,8 @@ def _on_startup():
         "version": app.version,
         "pid": os.getpid(),
     })
+    # Run DB migrations for new config tables (idempotent)
+    _run_startup_migration()
     # Mark any stale running jobs as failed (from a previous container instance)
     _mark_stale_jobs_failed()
     # Auto-start newsletter workers and re-queue any unprocessed newsletters
@@ -1727,7 +1755,8 @@ def root():
         "ingest_newsletter": "POST /ingest-newsletter — ingest one email from n8n (body: email_id, source, author, subject, published_at, body_html, body_text)",
         "newsletters": "GET /newsletters — list newsletters (?source=, ?processed=, ?limit=)",
         "newsletter_insights": "GET /newsletter-insights — search insights (?q=, ?source=, ?category=, ?limit=)",
-        "newsletter_sources": "GET /newsletter-sources — list configured sources",
+        "newsletter_sources": "GET /newsletter-sources — list active sources (DB-backed); POST /newsletter-sources — add new source {slug, author, gmail_query}",
+        "channels": "GET /channels — list active YouTube channel configs (DB-backed); POST /channels — add new channel {slug, channel_handle, display_name}",
     }
 
 
@@ -1983,6 +2012,135 @@ def list_newsletter_insights(
 
 @app.get("/newsletter-sources")
 def newsletter_sources():
-    """List all configured newsletter sources."""
-    from newsletter_ingestor import NEWSLETTER_SOURCES
-    return {"sources": NEWSLETTER_SOURCES}
+    """List all active newsletter sources from DB (falls back to hardcoded if DB unavailable)."""
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        from newsletter_ingestor import _NEWSLETTER_SOURCES_FALLBACK
+        return {"sources": _NEWSLETTER_SOURCES_FALLBACK, "source": "fallback"}
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT slug, author, gmail_query, active, created_at FROM newsletter_source_configs WHERE active = TRUE ORDER BY created_at"
+            )
+            rows = cur.fetchall()
+        conn.close()
+        sources = [
+            {"slug": r[0], "author": r[1], "gmail_query": r[2], "active": r[3], "created_at": r[4].isoformat() if r[4] else None}
+            for r in rows
+        ]
+        return {"sources": sources, "source": "db"}
+    except Exception as e:
+        from newsletter_ingestor import _NEWSLETTER_SOURCES_FALLBACK
+        return {"sources": _NEWSLETTER_SOURCES_FALLBACK, "source": "fallback", "error": str(e)}
+
+
+class NewsletterSourceCreateRequest(BaseModel):
+    slug: str
+    author: str
+    gmail_query: str
+
+
+@app.post("/newsletter-sources")
+def newsletter_sources_create(req: NewsletterSourceCreateRequest):
+    """Add a new newsletter source. Slug must be unique."""
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO newsletter_source_configs (slug, author, gmail_query)
+                VALUES (%s, %s, %s)
+                RETURNING id, slug, author, gmail_query, active, created_at
+                """,
+                (req.slug, req.author, req.gmail_query),
+            )
+            row = cur.fetchone()
+        conn.commit()
+        conn.close()
+        return {
+            "ok": True,
+            "source": {
+                "id": str(row[0]),
+                "slug": row[1],
+                "author": row[2],
+                "gmail_query": row[3],
+                "active": row[4],
+                "created_at": row[5].isoformat() if row[5] else None,
+            },
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/channels")
+def list_channels():
+    """List all active YouTube channel configs from DB (falls back to hardcoded if DB unavailable)."""
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        from youtube_client import DEFAULT_CHANNEL_HANDLES
+        return {"channels": [{"slug": k, "channel_handle": v, "display_name": k.replace("_", " ").title()} for k, v in DEFAULT_CHANNEL_HANDLES.items()], "source": "fallback"}
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT slug, channel_handle, display_name, active, created_at FROM channel_configs WHERE active = TRUE ORDER BY created_at"
+            )
+            rows = cur.fetchall()
+        conn.close()
+        channels = [
+            {"slug": r[0], "channel_handle": r[1], "display_name": r[2], "active": r[3], "created_at": r[4].isoformat() if r[4] else None}
+            for r in rows
+        ]
+        return {"channels": channels, "source": "db"}
+    except Exception as e:
+        from youtube_client import DEFAULT_CHANNEL_HANDLES
+        return {"channels": [{"slug": k, "channel_handle": v, "display_name": k.replace("_", " ").title()} for k, v in DEFAULT_CHANNEL_HANDLES.items()], "source": "fallback", "error": str(e)}
+
+
+class ChannelCreateRequest(BaseModel):
+    slug: str
+    channel_handle: str
+    display_name: str
+
+
+@app.post("/channels")
+def channels_create(req: ChannelCreateRequest):
+    """Add a new YouTube channel config. Slug must be unique. Channel handle should not include @."""
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    try:
+        import psycopg2
+        conn = psycopg2.connect(db_url)
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO channel_configs (slug, channel_handle, display_name)
+                VALUES (%s, %s, %s)
+                RETURNING id, slug, channel_handle, display_name, active, created_at
+                """,
+                (req.slug, req.channel_handle.lstrip("@"), req.display_name),
+            )
+            row = cur.fetchone()
+        conn.commit()
+        conn.close()
+        return {
+            "ok": True,
+            "channel": {
+                "id": str(row[0]),
+                "slug": row[1],
+                "channel_handle": row[2],
+                "display_name": row[3],
+                "active": row[4],
+                "created_at": row[5].isoformat() if row[5] else None,
+            },
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
