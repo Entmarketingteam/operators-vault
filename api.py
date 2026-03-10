@@ -34,6 +34,7 @@ except ImportError:
                 if k.strip():
                     os.environ.setdefault(k.strip(), v.strip())
 
+import requests
 import tempfile
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -1320,6 +1321,23 @@ def _update_job_heartbeat(job_id: str, **extra: object) -> None:
                 j[k] = v
 
 
+def _notify_slack(message: str) -> None:
+    """Fire-and-forget Slack alert via chat.postMessage. Silently ignores all errors."""
+    try:
+        token = os.environ.get("SLACK_BOT_TOKEN", "")
+        channel = os.environ.get("SLACK_ALERT_CHANNEL", "#general")
+        if not token:
+            return
+        requests.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {token}"},
+            json={"channel": channel, "text": message},
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
 def _run_async_job(job_id: str, fn, job_type: str):
     """Run fn() in a background thread with heartbeat, structured logging, and captured output."""
     now = time.time()
@@ -1372,6 +1390,7 @@ def _run_async_job(job_id: str, fn, job_type: str):
                     "stderr": (buf_err.getvalue() + "\n" + traceback.format_exc())[-8000:],
                 }
             log_job_event(job_id, "failed", {"type": job_type, "error": err_str})
+            _notify_slack(f":rotating_light: Operators Vault sync failed\nJob: {job_type}\nError: {err_str[:200]}")
         except Exception as e:
             err_str = f"{type(e).__name__}: {e!s}"
             with _jobs_lock:
@@ -1383,6 +1402,7 @@ def _run_async_job(job_id: str, fn, job_type: str):
                     "stderr": (buf_err.getvalue() + "\n" + traceback.format_exc())[-8000:],
                 }
             log_job_event(job_id, "failed", {"type": job_type, "error": err_str})
+            _notify_slack(f":rotating_light: Operators Vault sync failed\nJob: {job_type}\nError: {err_str[:200]}")
         finally:
             heartbeat_stop.set()
 
