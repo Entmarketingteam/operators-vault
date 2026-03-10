@@ -1229,7 +1229,15 @@ def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     limit = min(limit, 200)
     conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn.autocommit = True
     cur = conn.cursor()
+    try:
+        # Ensure host columns exist (idempotent — safe to run every time)
+        cur.execute("ALTER TABLE speaker_profiles ADD COLUMN IF NOT EXISTS is_host BOOLEAN DEFAULT FALSE")
+        cur.execute("ALTER TABLE speaker_profiles ADD COLUMN IF NOT EXISTS host_podcast TEXT")
+    except Exception:
+        pass
+    conn.autocommit = False
     try:
         cur.execute(
             """
