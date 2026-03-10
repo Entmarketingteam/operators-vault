@@ -54,6 +54,8 @@ export default function SpeakerDetailPage() {
     .slice(0, 2)
     .toUpperCase();
 
+  const insights = speaker.insights || speaker.top_insights || [];
+
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-10">
       <Link href="/speakers">
@@ -93,18 +95,18 @@ export default function SpeakerDetailPage() {
       </div>
 
       {/* Top insights */}
-      {speaker.top_insights && speaker.top_insights.length > 0 && (
+      {insights.length > 0 && (
         <div>
           <h2 className="text-xl font-semibold mb-4">Top Insights</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {speaker.top_insights.map((insight, i) => (
+            {insights.map((insight, i) => (
               <InsightCard key={insight.id || i} insight={insight} />
             ))}
           </div>
         </div>
       )}
 
-      {(!speaker.top_insights || speaker.top_insights.length === 0) && (
+      {insights.length === 0 && (
         <div className="text-center py-12 vault-card">
           <div className="text-3xl mb-3">💡</div>
           <div className="font-medium mb-1">No indexed insights yet</div>

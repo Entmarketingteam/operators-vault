@@ -17,7 +17,7 @@ function SpeakerCard({ speaker }: { speaker: Speaker }) {
     .toUpperCase();
 
   return (
-    <Link href={`/speakers/${speaker.id}`}>
+    <Link href={`/speakers/${speaker.slug || speaker.id}`}>
       <div className="vault-card p-5 group cursor-pointer h-full flex flex-col">
         <div className="flex items-start gap-4 mb-3">
           <Avatar className="h-12 w-12 shrink-0">

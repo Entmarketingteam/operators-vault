@@ -19,12 +19,16 @@ export interface Insight {
 
 export interface Speaker {
   id: string;
+  slug?: string;
   name: string;
   company?: string;
+  title?: string;
   bio?: string;
   photo_url?: string;
+  twitter_handle?: string;
   insight_count?: number;
   top_insights?: Insight[];
+  insights?: Insight[];
 }
 
 export interface Episode {

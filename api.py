@@ -1467,7 +1467,18 @@ def chat(
         reply = ""
         if r.content and len(r.content) > 0 and hasattr(r.content[0], "text"):
             reply = r.content[0].text
-        return {"reply": reply, "citations": len(hits)}
+        sources = [
+            {
+                "id": h.get("id"),
+                "title": h.get("headline_title") or h.get("title") or "",
+                "description": h.get("headline_description") or h.get("description") or "",
+                "source": (h.get("podcast") or "").replace("_", " "),
+                "podcast": h.get("podcast"),
+                "category": h.get("category"),
+            }
+            for h in hits[:5]
+        ]
+        return {"reply": reply, "citations": len(hits), "sources": sources}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat failed: {e!s}")
 
