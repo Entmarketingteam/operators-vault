@@ -20,7 +20,7 @@ def _load_prompt(name: str, prompt_set: str = DEFAULT_PROMPT_SET) -> str:
     return p.read_text(encoding="utf-8") if p.exists() else ""
 
 
-def _anthropic_message(system: str, user: str, model: str = "claude-sonnet-4-5-20250929") -> str:
+def _anthropic_message(system: str, user: str, model: str = "claude-haiku-4-5-20251001") -> str:
     try:
         import anthropic
     except ImportError:
