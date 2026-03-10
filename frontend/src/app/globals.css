@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0f0f13;
+  --foreground: #f0f0f5;
+  --card: #1a1a24;
+  --card-foreground: #f0f0f5;
+  --popover: #1a1a24;
+  --popover-foreground: #f0f0f5;
+  --primary: #6366f1;
+  --primary-foreground: #ffffff;
+  --secondary: #2a2a38;
+  --secondary-foreground: #a0a0b8;
+  --muted: #1e1e2a;
+  --muted-foreground: #7070a0;
+  --accent: #6366f1;
+  --accent-foreground: #ffffff;
+  --border: #2a2a3a;
+  --input: #2a2a3a;
+  --ring: #6366f1;
+  --radius: 0.75rem;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  border-color: var(--border);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--background);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--secondary-foreground);
+}
+
+/* Custom utility classes */
+.vault-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.vault-card:hover {
+  border-color: rgba(99, 102, 241, 0.4);
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.1), 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.glow-border {
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.3), 0 4px 32px rgba(99, 102, 241, 0.08);
+}
+
+/* Prose for markdown */
+.prose-vault h1 { font-size: 1.875rem; font-weight: 700; margin-bottom: 1rem; color: var(--foreground); }
+.prose-vault h2 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.75rem; margin-top: 2rem; color: var(--foreground); }
+.prose-vault h3 { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.5rem; margin-top: 1.5rem; color: var(--foreground); }
+.prose-vault p { margin-bottom: 1rem; color: rgba(240,240,245,0.85); line-height: 1.7; }
+.prose-vault ul { margin-bottom: 1rem; padding-left: 1.5rem; }
+.prose-vault li { margin-bottom: 0.4rem; color: rgba(240,240,245,0.85); line-height: 1.7; }
+.prose-vault strong { font-weight: 600; color: var(--foreground); }
+.prose-vault code { background: rgba(99,102,241,0.15); padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.875em; font-family: var(--font-mono), monospace; }
+.prose-vault blockquote { border-left: 3px solid var(--primary); padding-left: 1rem; margin: 1.5rem 0; color: var(--secondary-foreground); font-style: italic; }
+.prose-vault hr { border-color: var(--border); margin: 2rem 0; }
