@@ -676,8 +676,9 @@ def _search_postgres(
         conn = psycopg2.connect(db_url, connect_timeout=10)
         cur = conn.cursor()
         try:
+            q_clean = q.strip()
             nl_where = ["to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')) @@ plainto_tsquery('english', %s)"]
-            nl_params: list = [q.strip()]
+            nl_params: list = [q_clean, q_clean]  # first for WHERE tsquery, second for ts_rank
             if category:
                 nl_where.append("ni.category ILIKE %s")
                 nl_params.append(f"%{category}%")
@@ -693,7 +694,7 @@ def _search_postgres(
                 ORDER BY rank DESC
                 LIMIT %s
                 """,
-                [q.strip()] + nl_params,
+                nl_params,
             )
             for row in cur.fetchall():
                 hits.append({
@@ -896,9 +897,8 @@ def _list_insights(
 def episodes(
     podcast: str | None = None,
     limit: int = 100,
-    _: dict = Depends(_verify_supabase_jwt),
 ):
-    """List episodes (videos) for catalog. Optional podcast filter. Requires Bearer token."""
+    """List episodes (videos) for catalog. Optional podcast filter. Public — no auth required."""
     return _list_episodes(podcast=podcast, limit=limit)
 
 
@@ -1451,7 +1451,7 @@ def chat(
     try:
         client = anthropic.Anthropic(api_key=api_key)
         r = client.messages.create(
-            model="claude-sonnet-4-5-20250929",
+            model="claude-sonnet-4-6",
             max_tokens=1024,
             system=system,
             messages=[{"role": "user", "content": user_content}],
@@ -2216,6 +2216,89 @@ def list_newsletter_insights(
             conn.close()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class TopicGuideRequest(BaseModel):
+    topic: str
+
+
+@app.post("/topic-guide")
+def topic_guide(body: TopicGuideRequest):
+    """
+    Generate a topic guide by searching the vault for the given topic,
+    then compiling insights into a structured markdown guide via Haiku.
+    Public — no auth required.
+    """
+    import anthropic
+    topic = (body.topic or "").strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic required")
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not set")
+
+    # Search all content types for this topic
+    results = _search_postgres(topic, limit=15, type_="all")
+    hits = results.get("hits", [])
+
+    # Also search newsletter insights directly (they're included in "all" but let's be thorough)
+    if not hits:
+        raise HTTPException(status_code=404, detail=f"No content found on topic: {topic}")
+
+    # Build context from hits
+    context_parts = []
+    sources = []
+    for h in hits:
+        t = h.get("headline_title") or h.get("title") or ""
+        d = h.get("headline_description") or h.get("description") or h.get("text") or ""
+        pod = (h.get("podcast") or h.get("source") or "").replace("_", " ")
+        author = h.get("author") or pod
+        if t or d:
+            context_parts.append(f"**{t}** ({author}): {d[:400]}")
+            sources.append({
+                "id": h.get("id", ""),
+                "title": t,
+                "description": d,
+                "source": pod,
+                "type": h.get("type", ""),
+                "podcast": h.get("podcast"),
+                "video_id": h.get("video_id"),
+                "author": author,
+            })
+
+    context = "\n\n".join(context_parts)
+    prompt = (
+        f"You are an expert DTC and eCommerce operator analyst. "
+        f"Based on the following insights from industry experts, write a concise, actionable Topic Guide on: **{topic}**\n\n"
+        f"Format the guide in markdown with:\n"
+        f"- A 2-3 sentence executive summary\n"
+        f"- 3-5 key sections with headers\n"
+        f"- Bullet points under each section\n"
+        f"- A 'Key Takeaways' section at the end\n\n"
+        f"Draw directly from these insights (cite the source name where relevant):\n\n{context}\n\n"
+        f"Write the guide now:"
+    )
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        r = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=1500,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        content = r.content[0].text if r.content else ""
+        return {"topic": topic, "content": content, "sources": sources[:10], "ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Guide generation failed: {e!s}")
+
+
+@app.get("/topic-guide/search")
+def topic_guide_search(q: str = "", limit: int = 10):
+    """Search vault for a topic and return raw hits (no LLM). Public — no auth required."""
+    if not q:
+        raise HTTPException(status_code=400, detail="q required")
+    results = _search_postgres(q.strip(), limit=limit, type_="all")
+    return results
 
 
 @app.get("/newsletter-sources")

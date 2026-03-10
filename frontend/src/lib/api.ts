@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "https://superb-smile-production.up.railway.app";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_API_BASE || "https://superb-smile-production.up.railway.app";
 
 export interface Insight {
   id: string;
@@ -120,16 +120,16 @@ export async function generateTopicGuide(topic: string): Promise<TopicGuide> {
 
 export async function sendChatMessage(
   message: string,
-  history: Array<{ role: string; content: string }>,
+  _history: Array<{ role: string; content: string }>,
   token?: string
-): Promise<{ answer: string; sources?: Insight[] }> {
+): Promise<{ reply: string; citations?: number; sources?: Insight[] }> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
   const res = await fetch(`${API_BASE}/chat`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ message, history }),
+    body: JSON.stringify({ message, context_limit: 10 }),
   });
   if (!res.ok) throw new Error(`Chat failed: ${res.statusText}`);
   return res.json();
