@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { getEpisodes, type Episode } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Loader2, Search, PlayCircle, Calendar, Clock } from "lucide-react";
+import { Loader2, Search, PlayCircle, Calendar, Clock, ExternalLink } from "lucide-react";
 
 function getPodcastVariant(podcast?: string): "podcast" | "newsletter" {
   return "podcast";
@@ -79,18 +79,32 @@ function EpisodeRow({ episode }: { episode: Episode }) {
               {episode.description}
             </p>
           )}
-          <div className="flex flex-wrap items-center gap-3 mt-2 text-xs text-[var(--muted-foreground)]">
-            {episode.published_at && (
-              <span className="flex items-center gap-1">
-                <Calendar className="h-3 w-3" />
-                {new Date(episode.published_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-              </span>
-            )}
-            {episode.duration && (
-              <span className="flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {episode.duration}
-              </span>
+          <div className="flex flex-wrap items-center justify-between mt-2">
+            <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted-foreground)]">
+              {episode.published_at && (
+                <span className="flex items-center gap-1">
+                  <Calendar className="h-3 w-3" />
+                  {new Date(episode.published_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                </span>
+              )}
+              {episode.duration && (
+                <span className="flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  {episode.duration}
+                </span>
+              )}
+            </div>
+            {episode.video_id && (
+              <a
+                href={`https://youtube.com/watch?v=${episode.video_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border border-[var(--border)] text-[var(--muted-foreground)] hover:border-indigo-500/40 hover:text-indigo-300 transition-colors"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink className="h-3 w-3" />
+                Watch
+              </a>
             )}
           </div>
         </div>

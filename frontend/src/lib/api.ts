@@ -15,6 +15,8 @@ export interface Insight {
   episode_title?: string;
   published_at?: string;
   author?: string;
+  video_id?: string;
+  start_time_sec?: string | number;
 }
 
 export interface Speaker {
@@ -42,6 +44,7 @@ export interface Episode {
   published_at?: string;
   duration?: string;
   description?: string;
+  video_id?: string;
 }
 
 export interface TopicGuide {
@@ -112,7 +115,17 @@ export async function getEpisodes(): Promise<Episode[]> {
   const res = await fetch(`${API_BASE}/episodes`).catch(() => null);
   if (!res?.ok) return [];
   const data = await res.json();
-  return Array.isArray(data) ? data : data.episodes || [];
+  const raw: Array<Record<string, unknown>> = Array.isArray(data) ? data : data.episodes || [];
+  return raw.map((r) => ({
+    id: (r.video_id as string) || (r.id as string) || "",
+    title: (r.title as string) || "",
+    podcast: r.podcast as string | undefined,
+    thumbnail_url: r.thumbnail_url as string | undefined,
+    published_at: r.published_at as string | undefined,
+    duration: r.duration as string | undefined,
+    description: r.description as string | undefined,
+    video_id: (r.video_id as string) || undefined,
+  }));
 }
 
 export async function generateTopicGuide(topic: string): Promise<TopicGuide> {

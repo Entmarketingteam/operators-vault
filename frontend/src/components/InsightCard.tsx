@@ -1,7 +1,7 @@
 import { type Insight } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
-import { User, Podcast, Mail, Tag } from "lucide-react";
+import { User, Podcast, Mail, Tag, Play } from "lucide-react";
 
 function getSourceVariant(source?: string): "podcast" | "newsletter" {
   if (!source) return "podcast";
@@ -30,8 +30,13 @@ export default function InsightCard({ insight }: { insight: Insight }) {
   const sourceVariant = getSourceVariant(source);
   const displaySource = insight.podcast ? getPodcastShortName(insight.podcast) : (insight.author || source);
 
-  return (
-    <Card className="group cursor-default flex flex-col h-full">
+  const isVideo = !!insight.video_id;
+  const youtubeUrl = isVideo
+    ? `https://youtube.com/watch?v=${insight.video_id}&t=${Math.floor(Number(insight.start_time_sec ?? 0))}`
+    : undefined;
+
+  const cardContent = (
+    <>
       <CardHeader className="pb-2">
         <div className="flex flex-wrap gap-1.5 mb-2">
           {displaySource && (
@@ -75,7 +80,29 @@ export default function InsightCard({ insight }: { insight: Insight }) {
             {insight.episode_title}
           </div>
         )}
+        {isVideo && (
+          <div className="flex items-center gap-1 text-xs text-indigo-400 mt-1">
+            <Play className="h-3 w-3" />
+            <span>Watch clip</span>
+          </div>
+        )}
       </CardContent>
+    </>
+  );
+
+  if (isVideo && youtubeUrl) {
+    return (
+      <a href={youtubeUrl} target="_blank" rel="noopener noreferrer" className="block h-full">
+        <Card className="group cursor-pointer flex flex-col h-full hover:border-indigo-500/50 transition-colors">
+          {cardContent}
+        </Card>
+      </a>
+    );
+  }
+
+  return (
+    <Card className="group cursor-default flex flex-col h-full">
+      {cardContent}
     </Card>
   );
 }
