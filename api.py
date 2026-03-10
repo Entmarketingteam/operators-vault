@@ -77,7 +77,7 @@ def _run_startup_migration() -> None:
     if not db_url:
         return
     import psycopg2
-    for migration_name in ("add_channel_configs.sql", "add_speaker_profiles.sql"):
+    for migration_name in ("add_channel_configs.sql", "add_speaker_profiles.sql", "add_host_fields.sql"):
         migration_path = _root / "sql" / migration_name
         if not migration_path.exists():
             _log.warning("startup_migration_missing", extra={"path": str(migration_path)})
@@ -1217,6 +1217,8 @@ class SpeakerUpsertRequest(BaseModel):
     linkedin_url: str | None = None
     website: str | None = None
     source: str = "manual"
+    is_host: bool = False
+    host_podcast: str | None = None
 
 
 def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
@@ -1234,14 +1236,16 @@ def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
             SELECT sp.id, sp.slug, sp.name, sp.bio, sp.twitter_handle, sp.linkedin_url,
                    sp.photo_url, sp.company, sp.title, sp.website, sp.source,
                    sp.created_at, sp.updated_at,
-                   COUNT(DISTINCT ip.insight_id) AS insight_count
+                   COUNT(DISTINCT ip.insight_id) AS insight_count,
+                   COALESCE(sp.is_host, FALSE) AS is_host,
+                   sp.host_podcast
             FROM speaker_profiles sp
             LEFT JOIN people p ON LOWER(p.name) = LOWER(sp.name) OR p.slug = sp.slug
             LEFT JOIN insight_people ip ON ip.person_id = p.id
             GROUP BY sp.id, sp.slug, sp.name, sp.bio, sp.twitter_handle, sp.linkedin_url,
                      sp.photo_url, sp.company, sp.title, sp.website, sp.source,
-                     sp.created_at, sp.updated_at
-            ORDER BY insight_count DESC, sp.name
+                     sp.created_at, sp.updated_at, sp.is_host, sp.host_podcast
+            ORDER BY COALESCE(sp.is_host, FALSE) DESC, insight_count DESC, sp.name
             LIMIT %s OFFSET %s
             """,
             (limit, offset),
@@ -1265,6 +1269,8 @@ def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
                 "created_at": r[11].isoformat() if r[11] else None,
                 "updated_at": r[12].isoformat() if r[12] else None,
                 "insight_count": int(r[13]),
+                "is_host": bool(r[14]),
+                "host_podcast": r[15],
             }
             for r in rows
         ]
@@ -1286,7 +1292,8 @@ def _get_speaker_by_slug(slug: str) -> dict:
         cur.execute(
             """
             SELECT id, slug, name, bio, twitter_handle, linkedin_url, photo_url,
-                   company, title, website, source, created_at, updated_at
+                   company, title, website, source, created_at, updated_at,
+                   COALESCE(is_host, FALSE), host_podcast
             FROM speaker_profiles
             WHERE slug = %s
             """,
@@ -1309,6 +1316,8 @@ def _get_speaker_by_slug(slug: str) -> dict:
             "source": row[10],
             "created_at": row[11].isoformat() if row[11] else None,
             "updated_at": row[12].isoformat() if row[12] else None,
+            "is_host": bool(row[13]),
+            "host_podcast": row[14],
         }
         # Join with insights via people table (match on name/slug)
         cur.execute(
@@ -1354,8 +1363,8 @@ def _upsert_speaker(data: SpeakerUpsertRequest) -> dict:
         cur.execute(
             """
             INSERT INTO speaker_profiles
-                (slug, name, bio, twitter_handle, linkedin_url, photo_url, company, title, website, source)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (slug, name, bio, twitter_handle, linkedin_url, photo_url, company, title, website, source, is_host, host_podcast)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (slug) DO UPDATE SET
                 name = EXCLUDED.name,
                 bio = COALESCE(EXCLUDED.bio, speaker_profiles.bio),
@@ -1366,6 +1375,8 @@ def _upsert_speaker(data: SpeakerUpsertRequest) -> dict:
                 title = COALESCE(EXCLUDED.title, speaker_profiles.title),
                 website = COALESCE(EXCLUDED.website, speaker_profiles.website),
                 source = EXCLUDED.source,
+                is_host = EXCLUDED.is_host,
+                host_podcast = COALESCE(EXCLUDED.host_podcast, speaker_profiles.host_podcast),
                 updated_at = NOW()
             RETURNING id, slug, name, source, updated_at
             """,
@@ -1380,6 +1391,8 @@ def _upsert_speaker(data: SpeakerUpsertRequest) -> dict:
                 data.title,
                 data.website,
                 data.source,
+                data.is_host,
+                data.host_podcast,
             ),
         )
         row = cur.fetchone()

@@ -26,9 +26,12 @@ export interface Speaker {
   bio?: string;
   photo_url?: string;
   twitter_handle?: string;
+  linkedin_url?: string;
   insight_count?: number;
   top_insights?: Insight[];
   insights?: Insight[];
+  is_host?: boolean;
+  host_podcast?: string;
 }
 
 export interface Episode {

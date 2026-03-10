@@ -7,8 +7,13 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import InsightCard from "@/components/InsightCard";
-import { Loader2, ArrowLeft, Building2, Lightbulb } from "lucide-react";
+import { Loader2, ArrowLeft, Building2, Lightbulb, Mic, Twitter } from "lucide-react";
 import Link from "next/link";
+
+const PODCAST_LABELS: Record<string, string> = {
+  "9operators": "9 Operators Host",
+  "marketing_operator": "Marketing Operators Host",
+};
 
 export default function SpeakerDetailPage() {
   const params = useParams();
@@ -82,14 +87,31 @@ export default function SpeakerDetailPage() {
             {speaker.bio && (
               <p className="text-[var(--muted-foreground)] leading-relaxed max-w-2xl">{speaker.bio}</p>
             )}
-            {speaker.insight_count !== undefined && (
-              <div className="flex items-center gap-2 mt-4">
+            <div className="flex flex-wrap items-center gap-2 mt-4">
+              {speaker.is_host && speaker.host_podcast && (
+                <Badge className="bg-indigo-600/20 text-indigo-300 border-indigo-500/30 hover:bg-indigo-600/30">
+                  <Mic className="h-3 w-3 mr-1" />
+                  {PODCAST_LABELS[speaker.host_podcast] ?? "Podcast Host"}
+                </Badge>
+              )}
+              {(insights.length > 0 || (speaker.insight_count ?? 0) > 0) && (
                 <Badge variant="default">
                   <Lightbulb className="h-3 w-3 mr-1" />
-                  {speaker.insight_count} insights in vault
+                  {speaker.insight_count ?? insights.length} insights in vault
                 </Badge>
-              </div>
-            )}
+              )}
+              {speaker.twitter_handle && (
+                <a
+                  href={`https://twitter.com/${speaker.twitter_handle}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-sm text-[var(--muted-foreground)] hover:text-sky-400 transition-colors"
+                >
+                  <Twitter className="h-3.5 w-3.5" />
+                  @{speaker.twitter_handle}
+                </a>
+              )}
+            </div>
           </div>
         </div>
       </div>
