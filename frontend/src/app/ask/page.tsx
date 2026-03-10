@@ -135,7 +135,7 @@ export default function AskPage() {
 
       const assistantMsg: Message = {
         role: "assistant",
-        content: response.answer || "I couldn't find a specific answer for that. Try rephrasing or searching the vault directly.",
+        content: response.reply || "I couldn't find a specific answer for that. Try rephrasing or searching the vault directly.",
         sources: response.sources,
       };
       setMessages((prev) => [...prev, assistantMsg]);
