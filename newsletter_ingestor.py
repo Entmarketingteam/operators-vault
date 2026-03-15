@@ -203,10 +203,19 @@ def upsert_newsletter(
     try:
         with conn.cursor() as cur:
             # Check existing
-            cur.execute("SELECT id, processed FROM newsletters WHERE email_id = %s", (email_id,))
+            cur.execute("SELECT id, processed, length(body_text) FROM newsletters WHERE email_id = %s", (email_id,))
             row = cur.fetchone()
             if row:
-                return str(row[0]), False  # already exists
+                existing_id, existing_processed, existing_body_len = str(row[0]), row[1], (row[2] or 0)
+                # If we have a substantially longer body, update and reset processed flag
+                if not existing_processed and len(body_text) > existing_body_len * 2 and len(body_text) > 500:
+                    cur.execute(
+                        "UPDATE newsletters SET body_text = %s, processed = FALSE WHERE id = %s",
+                        (body_text, existing_id),
+                    )
+                    conn.commit()
+                    return existing_id, True  # treat as new so extraction runs
+                return existing_id, False  # already exists, no update needed
 
             nl_id = str(uuid.uuid4())
             cur.execute(
@@ -224,9 +233,7 @@ def upsert_newsletter(
 
 
 def store_newsletter_insights(newsletter_id: str, source: str, insights: list[dict]) -> int:
-    """Insert extracted insights. Returns count inserted."""
-    if not insights:
-        return 0
+    """Insert extracted insights and mark newsletter processed. Returns count inserted."""
     pool = _get_pool()
     conn = pool.getconn()
     try:
@@ -246,6 +253,7 @@ def store_newsletter_insights(newsletter_id: str, source: str, insights: list[di
                         ins.get("source_chunk", ""),
                     ),
                 )
+            # Always mark processed=TRUE, even if no insights (prevents infinite requeue loop)
             cur.execute("UPDATE newsletters SET processed = TRUE WHERE id = %s", (newsletter_id,))
             conn.commit()
         return len(insights)
