@@ -208,7 +208,7 @@ def upsert_newsletter(
             if row:
                 existing_id, existing_processed, existing_body_len = str(row[0]), row[1], (row[2] or 0)
                 # If we have a substantially longer body, update and reset processed flag
-                if not existing_processed and len(body_text) > existing_body_len * 2 and len(body_text) > 500:
+                if len(body_text) > existing_body_len * 2 and len(body_text) > 500:
                     cur.execute(
                         "UPDATE newsletters SET body_text = %s, processed = FALSE WHERE id = %s",
                         (body_text, existing_id),
