@@ -207,6 +207,7 @@ def _verify_supabase_jwt(credentials: HTTPAuthorizationCredentials | None = Depe
 # ---------------------------------------------------------------------------
 # Each job: {status, type, result, error, logs, worker_id, started_at, updated_at}
 _jobs: dict[str, dict] = {}
+_speaker_columns_cache: dict[str, set] = {}
 _jobs_lock = threading.Lock()
 _worker_id = f"w-{uuid.uuid4().hex[:8]}"  # unique per container instance
 _shutting_down = threading.Event()
@@ -884,11 +885,10 @@ def _list_episodes(podcast: str | None = None, limit: int = 100) -> dict:
     conn = psycopg2.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
-        # Use minimal columns so this works with or without view_count/thumbnail_url
         if podcast:
             cur.execute(
                 """
-                SELECT video_id, title, podcast, duration_seconds, published_at
+                SELECT video_id, title, podcast, duration_seconds, published_at, view_count, thumbnail_url
                 FROM videos
                 WHERE podcast = %s
                 ORDER BY published_at DESC NULLS LAST, created_at DESC
@@ -899,7 +899,7 @@ def _list_episodes(podcast: str | None = None, limit: int = 100) -> dict:
         else:
             cur.execute(
                 """
-                SELECT video_id, title, podcast, duration_seconds, published_at
+                SELECT video_id, title, podcast, duration_seconds, published_at, view_count, thumbnail_url
                 FROM videos
                 ORDER BY published_at DESC NULLS LAST, created_at DESC
                 LIMIT %s
@@ -913,8 +913,8 @@ def _list_episodes(podcast: str | None = None, limit: int = 100) -> dict:
                 "title": r[1] or "",
                 "podcast": r[2],
                 "duration_seconds": r[3],
-                "view_count": None,
-                "thumbnail_url": None,
+                "view_count": r[5],
+                "thumbnail_url": r[6],
                 "published_at": r[4].isoformat() if r[4] else None,
             }
             for r in rows
@@ -1368,12 +1368,16 @@ def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
     conn = psycopg2.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
-        # Check which host columns exist (avoids DDL permission issues)
-        cur.execute("""
-            SELECT column_name FROM information_schema.columns
-            WHERE table_name = 'speaker_profiles' AND column_name IN ('is_host', 'host_podcast')
-        """)
-        existing_cols = {r[0] for r in cur.fetchall()}
+        # Check which host columns exist (avoids DDL permission issues); use cache to skip repeated queries
+        if "speaker_profiles" in _speaker_columns_cache:
+            existing_cols = _speaker_columns_cache["speaker_profiles"]
+        else:
+            cur.execute("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_name = 'speaker_profiles' AND column_name IN ('is_host', 'host_podcast')
+            """)
+            existing_cols = {r[0] for r in cur.fetchall()}
+            _speaker_columns_cache["speaker_profiles"] = existing_cols
         has_host_cols = "is_host" in existing_cols and "host_podcast" in existing_cols
 
         # Try to add missing columns if needed
@@ -1386,6 +1390,8 @@ def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
                 if "host_podcast" not in existing_cols:
                     cur.execute("ALTER TABLE speaker_profiles ADD COLUMN IF NOT EXISTS host_podcast TEXT")
                 has_host_cols = True
+                # Invalidate cache so next call re-fetches the updated columns
+                _speaker_columns_cache.pop("speaker_profiles", None)
             except Exception as e:
                 _log.warning("add_host_cols_failed", extra={"error": str(e)})
             finally:

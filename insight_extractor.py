@@ -69,6 +69,7 @@ CATEGORIES = [
     "Stories and anecdotes",
     "Quotes",
     "Products",
+    "Creator and Influencer Tactics",
 ]
 
 
@@ -83,14 +84,14 @@ def _parse_insight_block(block: str, category: str) -> list[dict[str, str]]:
         # Quote: * "Quote" – Person
         mq = re.match(r'^"([^"]+)"\s*[–—\-]\s*(.+)$', line)
         if mq:
-            out.append({"title": mq.group(2).strip(), "description": mq.group(1).strip(), "category": category})
+            out.append({"title": mq.group(2).strip().strip('*').strip(), "description": mq.group(1).strip().strip('*').strip(), "category": category})
             continue
         # * Title: Description
         if ": " in line:
             t, d = line.split(": ", 1)
-            out.append({"title": t.strip(), "description": d.strip(), "category": category})
+            out.append({"title": t.strip().strip('*').strip(), "description": d.strip().strip('*').strip(), "category": category})
         else:
-            out.append({"title": line, "description": "", "category": category})
+            out.append({"title": line.strip('*').strip(), "description": "", "category": category})
     return out
 
 
@@ -101,6 +102,7 @@ _VALID_CATEGORIES = {
     "Stories and case studies",
     "Quotes",
     "Tools and products",
+    "Creator and Influencer Tactics",
 }
 
 def _normalize_category(raw: str) -> str:

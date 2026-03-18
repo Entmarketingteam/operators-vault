@@ -15,7 +15,28 @@ def _slugify(name: str) -> str:
     return s.strip("-")
 
 
-def _anthropic_message(system: str, user: str, model: str = "claude-sonnet-4-5-20250929") -> str:
+def _anthropic_message(system: str, user: str, model: str = "claude-haiku-4-5-20251001") -> str:
+    # Try agent server proxy first (uses Claude Max subscription, no API key needed)
+    agent_server = os.environ.get("AGENT_SERVER_URL", "https://ent-agent-server-production.up.railway.app")
+    agent_key = os.environ.get("AGENT_SERVER_API_KEY")
+    if agent_key:
+        try:
+            import urllib.request, json as _json
+            prompt = f"<system>\n{system}\n</system>\n\n{user}" if system else user
+            data = _json.dumps({"prompt": prompt, "model": model}).encode()
+            req = urllib.request.Request(
+                f"{agent_server}/complete",
+                data=data,
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {agent_key}"},
+            )
+            resp = _json.loads(urllib.request.urlopen(req, timeout=120).read())
+            text = resp.get("text", "")
+            if text:
+                return text
+        except Exception:
+            pass  # Fall through to direct API
+
+    # Fall back to direct Anthropic API
     try:
         import anthropic
     except ImportError:
