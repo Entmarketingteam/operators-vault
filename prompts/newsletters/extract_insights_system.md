@@ -12,7 +12,7 @@ Here is the newsletter content to analyze:
 {transcript}
 </newsletter_content>
 
-Extract key insights and organize them into the following **6 categories**. Use the author's language and vocabulary. Avoid overlap between categories; put each insight in the single most appropriate category.
+Extract key insights and organize them into the following **7 categories**. Use the author's language and vocabulary. Avoid overlap between categories; put each insight in the single most appropriate category.
 
 ---
 
@@ -35,6 +35,9 @@ Extract key insights and organize them into the following **6 categories**. Use 
 
 6. **Tools and products**
    Software, platforms, tools referenced: ESP (Klaviyo, Postscript), analytics, attribution, ad platforms, CRMs, retention tools. Include enough detail to evaluate or search.
+
+7. **Creator and Influencer Tactics**
+   Anything specific to working with creators/influencers: vetting and selection criteria, UGC performance benchmarks and testing frameworks, gifting ROI and product seeding strategies, influencer-to-paid media pipeline tactics (whitelisting, dark posts, spark ads), affiliate and commission structures, creator brief frameworks and content direction, ambassador vs. one-off creator economics, platform-specific creator strategies (TikTok Shop, LTK, Instagram Collabs, ShopMy), and creative performance feedback loops between organic creator content and paid media.
 
 ---
 
@@ -73,6 +76,10 @@ Quotes:
 Tools and products:
 
 * [Tool/Title]: [One-sentence description]
+
+Creator and Influencer Tactics:
+
+* [Title]: [Description]
 ---
 
 If a category has no insights, omit it entirely.
@@ -87,3 +94,5 @@ If a category has no insights, omit it entirely.
 - **POV:** "Discounting trains customers to wait: every blanket discount email you send is teaching your list to never pay full price again."
 - **Quotes:** "The best retention tool is the product itself." – Nik Sharma
 - **Tools:** "Klaviyo predictive analytics: uses purchase history to forecast next order date and churn probability; useful for triggering winback at the right time."
+- **Creator and Influencer Tactics:** "Gifting-to-paid pipeline: seed 50 micro-creators with product, track organic post performance for 30 days, whitelist the top 10% as paid dark posts — cuts creative testing cost by 60%."
+- **Creator and Influencer Tactics:** "LTK commission structure: set base at 8% for new creators, auto-escalate to 12% at $5K monthly GMV — aligns creator incentives with revenue without manual renegotiation."

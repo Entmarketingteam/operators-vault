@@ -12,7 +12,7 @@ Here is the podcast transcript chunk you need to analyze:
 {transcript}
 </transcript_chunk>
 
-Extract key insights and organize them into the following **6 categories**. Use the speakers’ language and vocabulary. Avoid overlap between categories; put each insight in the single most appropriate category.
+Extract key insights and organize them into the following **7 categories**. Use the speakers’ language and vocabulary. Avoid overlap between categories; put each insight in the single most appropriate category.
 
 ---
 
@@ -33,8 +33,11 @@ Extract key insights and organize them into the following **6 categories**. Use 
 5. **Quotes**  
    Direct quotes from guests or third parties (CMOs, founders, platform leads). Prefer lines that are sharp, repeatable, or tactic-defining. For quotes: include only the quote and the person being quoted.
 
-6. **Products**  
+6. **Products**
    Software and tools: ad platforms, CRMs (e.g. Klaviyo, Postscript), attribution, creative tools, Amazon tools, ERPs, analytics, retention/win-back. Include enough detail that someone could search or evaluate the product.
+
+7. **Creator and Influencer Tactics**
+   Anything specific to working with creators/influencers: vetting and selection criteria, UGC performance benchmarks and testing frameworks, gifting ROI and product seeding strategies, influencer-to-paid media pipeline tactics (whitelisting, dark posts, spark ads), affiliate and commission structures, creator brief frameworks and content direction, ambassador vs. one-off creator economics, platform-specific creator strategies (TikTok Shop, LTK, Instagram Collabs, ShopMy), and creative performance feedback loops between organic creator content and paid media.
 
 ---
 
@@ -79,6 +82,10 @@ Quotes:
 Products:
 
 * [Product/Title]: [One-sentence description; enough to search or evaluate]
+
+Creator and Influencer Tactics:
+
+* [Title]: [Description]
 ---
 
 If a category has no insights, omit it or write "*(none)*".
@@ -93,6 +100,8 @@ If a category has no insights, omit it or write "*(none)*".
 - **Stories:** "Ridge's first retail pitch to REI: what they tested and how they built the deck."
 - **Quotes:** "Creative is the new CMO" – [Guest name].
 - **Products:** "Northbeam for MMM and incrementality; used once you're at $20M+ and need to deprioritize last-touch."
+- **Creator and Influencer Tactics:** "Gifting-to-paid pipeline: seed 50 micro-creators with product, track organic post performance for 30 days, whitelist the top 10% as paid dark posts — cuts creative testing cost by 60%."
+- **Creator and Influencer Tactics:** "TikTok Shop affiliate tier: start every creator on 10% commission, bump to 15% after 10 sales, 20% after 50 — self-selects the high-performers without upfront spend."
 
 **Example ideal_output (exact format to follow):**
 
