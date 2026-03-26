@@ -157,7 +157,7 @@ function EpisodeCard({ episode }: { episode: Episode }) {
 
           {/* Play button */}
           <div className="mt-4">
-            <span className="inline-flex items-center gap-2 text-sm font-medium text-[var(--muted-foreground)] group-hover:text-indigo-300 transition-colors">
+            <span className="inline-flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-full bg-indigo-600/20 border border-indigo-500/40 text-indigo-300 group-hover:bg-indigo-600/40 group-hover:border-indigo-400/60 group-hover:text-indigo-200 transition-all">
               <PlayCircle className="h-4 w-4" />
               Play Episode
             </span>

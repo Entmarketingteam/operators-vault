@@ -130,6 +130,49 @@ export async function getEpisodes(): Promise<Episode[]> {
   }));
 }
 
+export interface NewsletterSource {
+  slug: string;
+  author: string;
+  active: boolean;
+}
+
+export interface NewsletterInsight {
+  id: string;
+  source: string;
+  author: string;
+  category?: string;
+  title: string;
+  description: string;
+  subject?: string;
+  published_at?: string;
+}
+
+export interface Newsletter {
+  id: string;
+  source: string;
+  author: string;
+  subject: string;
+  published_at?: string;
+  processed: boolean;
+  body_len?: number;
+}
+
+export async function getNewsletterSources(): Promise<NewsletterSource[]> {
+  const res = await fetch(`${API_BASE}/newsletter-sources`).catch(() => null);
+  if (!res?.ok) return [];
+  const data = await res.json();
+  return data.sources || [];
+}
+
+export async function getNewsletterInsights(source?: string, limit = 100): Promise<NewsletterInsight[]> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (source) params.set("source", source);
+  const res = await fetch(`${API_BASE}/newsletter-insights?${params}`).catch(() => null);
+  if (!res?.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data) ? data : data.insights || [];
+}
+
 export async function generateTopicGuide(topic: string): Promise<TopicGuide> {
   const res = await fetch(`${API_BASE}/topic-guide`, {
     method: "POST",

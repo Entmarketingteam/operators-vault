@@ -6,16 +6,17 @@ import { useEffect, useState } from "react";
 import { supabase, signInWithGoogle, signOut } from "@/lib/supabase";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Vault, LogIn, LogOut, Menu, X } from "lucide-react";
+import { LogIn, LogOut, Menu, X, ShoppingBag } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { cn } from "@/lib/utils";
 
 const navLinks = [
   { href: "/", label: "Discover" },
+  { href: "/newsletters", label: "Newsletters" },
+  { href: "/episodes", label: "Episodes" },
+  { href: "/speakers", label: "Speakers" },
   { href: "/guides", label: "Guides" },
   { href: "/ask", label: "Ask" },
-  { href: "/speakers", label: "Speakers" },
-  { href: "/episodes", label: "Episodes" },
 ];
 
 export default function Navbar() {
@@ -37,12 +38,14 @@ export default function Navbar() {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-16 items-center justify-between">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2.5 group">
+          <Link href="/" className="flex items-center gap-2.5 group shrink-0">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600/20 border border-indigo-500/30 group-hover:bg-indigo-600/30 transition-colors">
-              <Vault className="h-4 w-4 text-indigo-400" />
+              <ShoppingBag className="h-4 w-4 text-indigo-400" />
             </div>
-            <span className="font-bold text-base tracking-tight">
-              Operators <span className="text-indigo-400">Vault</span>
+            <span className="font-bold text-base tracking-tight leading-none">
+              <span className="text-indigo-400">ECOM</span>{" "}
+              <span className="text-[var(--foreground)]">Operators</span>{" "}
+              <span className="text-violet-400">Vault</span>
             </span>
           </Link>
 
@@ -80,7 +83,7 @@ export default function Navbar() {
             ) : (
               <Button size="sm" onClick={() => signInWithGoogle()}>
                 <LogIn className="h-4 w-4" />
-                Sign in with Google
+                Sign in
               </Button>
             )}
           </div>
