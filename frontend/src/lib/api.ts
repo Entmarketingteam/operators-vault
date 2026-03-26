@@ -113,7 +113,7 @@ export async function getSpeaker(id: string): Promise<Speaker | null> {
 }
 
 export async function getEpisodes(): Promise<Episode[]> {
-  const res = await fetch(`${API_BASE}/episodes`).catch(() => null);
+  const res = await fetch(`${API_BASE}/episodes?limit=500`).catch(() => null);
   if (!res?.ok) return [];
   const data = await res.json();
   const raw: Array<Record<string, unknown>> = Array.isArray(data) ? data : data.episodes || [];
