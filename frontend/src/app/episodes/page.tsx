@@ -4,18 +4,14 @@ import { useState, useEffect } from "react";
 import { getEpisodes, type Episode } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Loader2, Search, PlayCircle, Calendar, Clock, ExternalLink } from "lucide-react";
-
-function getPodcastVariant(podcast?: string): "podcast" | "newsletter" {
-  return "podcast";
-}
+import { Loader2, Search, PlayCircle, Calendar, Clock } from "lucide-react";
 
 function getPodcastDisplayName(podcast?: string): string {
   if (!podcast) return "Podcast";
   const map: Record<string, string> = {
-    "9operators": "9 Operators",
-    "9_operators": "9 Operators",
-    "marketing_operator": "Marketing Operator",
+    "9operators": "Nine Operators",
+    "9_operators": "Nine Operators",
+    "marketing_operator": "Marketing Operators",
     "finance_operators": "Finance Operators",
     "titans": "TITANS",
   };
@@ -31,96 +27,139 @@ function getPodcastColor(podcast?: string): string {
   return "indigo";
 }
 
-function EpisodeRow({ episode }: { episode: Episode }) {
+const colorStyles: Record<string, { badge: string; dot: string }> = {
+  indigo: {
+    badge: "bg-indigo-500/20 text-indigo-200 border-indigo-500/30",
+    dot: "bg-indigo-400",
+  },
+  emerald: {
+    badge: "bg-emerald-500/20 text-emerald-200 border-emerald-500/30",
+    dot: "bg-emerald-400",
+  },
+  violet: {
+    badge: "bg-violet-500/20 text-violet-200 border-violet-500/30",
+    dot: "bg-violet-400",
+  },
+  amber: {
+    badge: "bg-amber-500/20 text-amber-200 border-amber-500/30",
+    dot: "bg-amber-400",
+  },
+};
+
+function formatDuration(seconds?: number): string | null {
+  if (!seconds) return null;
+  const mins = Math.round(seconds / 60);
+  return `${mins} MIN`;
+}
+
+function getDescriptionPreview(description?: string): string {
+  if (!description) return "";
+  // Strip sponsor links and chapter headers, get first real paragraph
+  const lines = description.split("\n").filter((l) => {
+    const trimmed = l.trim();
+    return (
+      trimmed.length > 60 &&
+      !trimmed.startsWith("http") &&
+      !trimmed.startsWith("00:") &&
+      !trimmed.startsWith("Chapters") &&
+      !trimmed.startsWith("Powered By") &&
+      !trimmed.includes("https://")
+    );
+  });
+  return lines[0] || "";
+}
+
+function EpisodeCard({ episode }: { episode: Episode }) {
   const color = getPodcastColor(episode.podcast);
-  const colorMap: Record<string, string> = {
-    indigo: "bg-indigo-600/20 border-indigo-500/30 text-indigo-300",
-    emerald: "bg-emerald-600/20 border-emerald-500/30 text-emerald-300",
-    violet: "bg-violet-600/20 border-violet-500/30 text-violet-300",
-    amber: "bg-amber-600/20 border-amber-500/30 text-amber-300",
-  };
-  const iconColor: Record<string, string> = {
-    indigo: "text-indigo-400",
-    emerald: "text-emerald-400",
-    violet: "text-violet-400",
-    amber: "text-amber-400",
-  };
+  const styles = colorStyles[color];
+  const duration = formatDuration(episode.duration_seconds);
+  const preview = getDescriptionPreview(episode.description);
 
   return (
-    <div className="vault-card p-4 group cursor-default">
-      <div className="flex gap-4 items-start">
-        {/* Thumbnail or icon */}
-        {episode.thumbnail_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={episode.thumbnail_url}
-            alt={episode.title}
-            className="w-16 h-16 sm:w-20 sm:h-20 rounded-lg object-cover shrink-0 bg-[var(--secondary)]"
-          />
-        ) : (
-          <div className={`w-16 h-16 sm:w-20 sm:h-20 rounded-lg border flex items-center justify-center shrink-0 ${colorMap[color]}`}>
-            <PlayCircle className={`h-7 w-7 ${iconColor[color]}`} />
-          </div>
-        )}
-
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap gap-2 mb-1.5">
-            {episode.podcast && (
-              <Badge variant="podcast" className={`text-xs ${colorMap[color]}`}>
-                {getPodcastDisplayName(episode.podcast)}
-              </Badge>
-            )}
-          </div>
-          <h3 className="font-semibold text-sm sm:text-base leading-snug group-hover:text-indigo-300 transition-colors line-clamp-2 mb-1.5">
-            {episode.title}
-          </h3>
-          {episode.description && (
-            <p className="text-xs text-[var(--muted-foreground)] line-clamp-2 leading-relaxed hidden sm:block">
-              {episode.description}
-            </p>
+    <a
+      href={episode.video_id ? `https://youtube.com/watch?v=${episode.video_id}` : "#"}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="group block vault-card overflow-hidden transition-all hover:border-[var(--primary)]/40 hover:shadow-lg hover:shadow-indigo-900/20"
+    >
+      <div className="flex flex-col sm:flex-row">
+        {/* Thumbnail */}
+        <div className="relative sm:w-72 sm:shrink-0 aspect-video sm:aspect-auto overflow-hidden bg-[var(--secondary)]">
+          {episode.thumbnail_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={episode.thumbnail_url}
+              alt={episode.title}
+              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          ) : (
+            <div className={`w-full h-full flex items-center justify-center ${styles.badge}`}>
+              <PlayCircle className="h-12 w-12 opacity-60" />
+            </div>
           )}
-          <div className="flex flex-wrap items-center justify-between mt-2">
-            <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--muted-foreground)]">
-              {episode.published_at && (
-                <span className="flex items-center gap-1">
-                  <Calendar className="h-3 w-3" />
-                  {new Date(episode.published_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
+          <div className="absolute bottom-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-1.5 bg-black/70 backdrop-blur-sm text-white text-xs font-medium px-3 py-1.5 rounded-full">
+              <PlayCircle className="h-3.5 w-3.5" />
+              Watch
+            </div>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="flex flex-col justify-between p-5 flex-1 min-w-0">
+          <div>
+            {/* Meta row */}
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              {episode.podcast && (
+                <span className={`inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full border ${styles.badge}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${styles.dot}`} />
+                  {getPodcastDisplayName(episode.podcast)}
                 </span>
               )}
-              {episode.duration && (
-                <span className="flex items-center gap-1">
+              {episode.published_at && (
+                <span className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
+                  <Calendar className="h-3 w-3" />
+                  {new Date(episode.published_at).toLocaleDateString("en-US", {
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                </span>
+              )}
+              {duration && (
+                <span className="flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
                   <Clock className="h-3 w-3" />
-                  {episode.duration}
+                  {duration}
                 </span>
               )}
             </div>
-            {episode.video_id && (
-              <a
-                href={`https://youtube.com/watch?v=${episode.video_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border border-[var(--border)] text-[var(--muted-foreground)] hover:border-indigo-500/40 hover:text-indigo-300 transition-colors"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <ExternalLink className="h-3 w-3" />
-                Watch
-              </a>
+
+            {/* Title */}
+            <h3 className="font-bold text-lg leading-snug mb-3 group-hover:text-indigo-300 transition-colors line-clamp-3">
+              {episode.title}
+            </h3>
+
+            {/* Description preview */}
+            {preview && (
+              <p className="text-sm text-[var(--muted-foreground)] leading-relaxed line-clamp-3 hidden sm:block">
+                {preview}
+              </p>
             )}
+          </div>
+
+          {/* Play button */}
+          <div className="mt-4">
+            <span className="inline-flex items-center gap-2 text-sm font-medium text-[var(--muted-foreground)] group-hover:text-indigo-300 transition-colors">
+              <PlayCircle className="h-4 w-4" />
+              Play Episode
+            </span>
           </div>
         </div>
       </div>
-    </div>
+    </a>
   );
 }
-
-// Fallback data
-const FALLBACK_EPISODES: Episode[] = [
-  { id: "1", title: "How to Build a $100M DTC Brand from Scratch", podcast: "9operators", published_at: "2024-01-15" },
-  { id: "2", title: "Email Marketing Mastery: Retention Strategies That Work", podcast: "marketing_operator", published_at: "2024-02-10" },
-  { id: "3", title: "The Finance Behind Scaling DTC Brands", podcast: "finance_operators", published_at: "2024-02-20" },
-  { id: "4", title: "Influencer Strategy in 2024", podcast: "9operators", published_at: "2024-03-05" },
-  { id: "5", title: "Paid Social That Actually Converts", podcast: "marketing_operator", published_at: "2024-03-18" },
-];
 
 export default function EpisodesPage() {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -130,10 +169,9 @@ export default function EpisodesPage() {
 
   useEffect(() => {
     getEpisodes().then((data) => {
-      setEpisodes(data.length > 0 ? data : FALLBACK_EPISODES);
+      setEpisodes(data);
       setLoading(false);
     }).catch(() => {
-      setEpisodes(FALLBACK_EPISODES);
       setLoading(false);
     });
   }, []);
@@ -141,7 +179,8 @@ export default function EpisodesPage() {
   const podcasts = Array.from(new Set(episodes.map(e => e.podcast).filter(Boolean)));
 
   const filtered = episodes.filter((e) => {
-    const matchSearch = !search || e.title.toLowerCase().includes(search.toLowerCase());
+    const matchSearch = !search || e.title.toLowerCase().includes(search.toLowerCase()) ||
+      (e.description || "").toLowerCase().includes(search.toLowerCase());
     const matchPodcast = !podcastFilter || e.podcast === podcastFilter;
     return matchSearch && matchPodcast;
   });
@@ -161,7 +200,7 @@ export default function EpisodesPage() {
           </span>
         </h1>
         <p className="text-lg text-[var(--muted-foreground)] max-w-xl">
-          Browse all episodes from 9 Operators, Marketing Operator, Finance Operators, and TITANS.
+          Browse all episodes from 9 Operators, Marketing Operators, Finance Operators, and TITANS.
         </p>
       </div>
 
@@ -179,7 +218,7 @@ export default function EpisodesPage() {
         <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setPodcastFilter("")}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all border ${
+            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all border ${
               podcastFilter === ""
                 ? "bg-violet-600/20 text-violet-300 border-violet-500/40"
                 : "border-[var(--border)] text-[var(--muted-foreground)] hover:border-violet-500/30 hover:text-[var(--foreground)]"
@@ -187,25 +226,29 @@ export default function EpisodesPage() {
           >
             All Shows
           </button>
-          {podcasts.map((p) => (
-            <button
-              key={p}
-              onClick={() => setPodcastFilter(p || "")}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all border ${
-                podcastFilter === p
-                  ? "bg-violet-600/20 text-violet-300 border-violet-500/40"
-                  : "border-[var(--border)] text-[var(--muted-foreground)] hover:border-violet-500/30 hover:text-[var(--foreground)]"
-              }`}
-            >
-              {getPodcastDisplayName(p)}
-            </button>
-          ))}
+          {podcasts.map((p) => {
+            const color = getPodcastColor(p);
+            const styles = colorStyles[color];
+            return (
+              <button
+                key={p}
+                onClick={() => setPodcastFilter(p || "")}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all border ${
+                  podcastFilter === p
+                    ? `${styles.badge}`
+                    : "border-[var(--border)] text-[var(--muted-foreground)] hover:border-violet-500/30 hover:text-[var(--foreground)]"
+                }`}
+              >
+                {getPodcastDisplayName(p)}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* Count */}
       {!loading && (
-        <p className="text-sm text-[var(--muted-foreground)] mb-4">
+        <p className="text-sm text-[var(--muted-foreground)] mb-6">
           {filtered.length} episode{filtered.length !== 1 ? "s" : ""}
         </p>
       )}
@@ -216,9 +259,9 @@ export default function EpisodesPage() {
           <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
         </div>
       ) : filtered.length > 0 ? (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {filtered.map((ep) => (
-            <EpisodeRow key={ep.id} episode={ep} />
+            <EpisodeCard key={ep.id} episode={ep} />
           ))}
         </div>
       ) : (

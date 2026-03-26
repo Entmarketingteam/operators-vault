@@ -1,7 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { generateTopicGuide, type TopicGuide } from "@/lib/api";
+import { supabase } from "@/lib/supabase";
+import type { Session } from "@supabase/supabase-js";
+import { signInWithGoogle } from "@/lib/supabase";
+import { LogIn, Lock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -52,11 +56,51 @@ function SourceCard({ insight, index }: { insight: { title?: string; description
 }
 
 export default function GuidesPage() {
+  const [session, setSession] = useState<Session | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
   const [topic, setTopic] = useState("");
   const [guide, setGuide] = useState<TopicGuide | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      setSessionLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, s) => setSession(s));
+    return () => subscription.unsubscribe();
+  }, []);
+
+  if (sessionLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-24 text-center">
+        <div className="inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-600/10 border border-indigo-500/20 mb-6">
+          <Lock className="h-8 w-8 text-indigo-400" />
+        </div>
+        <h1 className="text-3xl font-bold mb-3">Sign in to access Guides</h1>
+        <p className="text-[var(--muted-foreground)] mb-8">
+          AI-powered playbooks synthesized from operator knowledge are available to signed-in members.
+        </p>
+        <button
+          onClick={() => signInWithGoogle()}
+          className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold transition-colors"
+        >
+          <LogIn className="h-4 w-4" />
+          Sign in with Google
+        </button>
+      </div>
+    );
+  }
 
   const handleGenerate = async (e?: React.FormEvent, topicOverride?: string) => {
     e?.preventDefault();

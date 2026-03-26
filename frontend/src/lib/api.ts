@@ -43,6 +43,7 @@ export interface Episode {
   thumbnail_url?: string;
   published_at?: string;
   duration?: string;
+  duration_seconds?: number;
   description?: string;
   video_id?: string;
 }
@@ -123,6 +124,7 @@ export async function getEpisodes(): Promise<Episode[]> {
     thumbnail_url: r.thumbnail_url as string | undefined,
     published_at: r.published_at as string | undefined,
     duration: r.duration as string | undefined,
+    duration_seconds: r.duration_seconds as number | undefined,
     description: r.description as string | undefined,
     video_id: (r.video_id as string) || undefined,
   }));
