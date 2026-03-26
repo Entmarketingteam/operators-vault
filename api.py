@@ -715,9 +715,31 @@ def _search_postgres(
         conn = psycopg2.connect(db_url, connect_timeout=10)
         cur = conn.cursor()
         try:
+            where_clauses = ["fts @@ plainto_tsquery('english', %s)"]
+            params: list = [q.strip()]
+            if podcast:
+                where_clauses.append("podcast = %s")
+                params.append(podcast)
+            if category:
+                where_clauses.append("category ILIKE %s")
+                params.append(f"%{category}%")
+            if video_id:
+                where_clauses.append("video_id = %s")
+                params.append(video_id)
+            params.append(limit)
             cur.execute(
-                "SELECT id, video_id, podcast, category, title, description, start_time_sec, end_time_sec, rank, headline_title, headline_description FROM search_insights(%s, %s, 0, %s, %s, %s)",
-                (q.strip(), limit, podcast, category, video_id),
+                f"""
+                SELECT id, video_id, podcast, category, title, description, start_time_sec, end_time_sec,
+                       ts_rank(fts, plainto_tsquery('english', %s)) AS rank,
+                       title AS headline_title,
+                       ts_headline('english', description, plainto_tsquery('english', %s),
+                           'MaxFragments=1,MaxWords=20,MinWords=5') AS headline_description
+                FROM insights
+                WHERE {" AND ".join(where_clauses)}
+                ORDER BY rank DESC
+                LIMIT %s
+                """,
+                [q.strip(), q.strip()] + params,
             )
             for row in cur.fetchall():
                 hits.append({
@@ -741,9 +763,27 @@ def _search_postgres(
         conn = psycopg2.connect(db_url, connect_timeout=10)
         cur = conn.cursor()
         try:
+            seg_where = ["fts @@ plainto_tsquery('english', %s)"]
+            seg_params: list = [q.strip()]
+            if podcast:
+                seg_where.append("podcast = %s")
+                seg_params.append(podcast)
+            if video_id:
+                seg_where.append("video_id = %s")
+                seg_params.append(video_id)
+            seg_params.append(limit)
             cur.execute(
-                "SELECT id, video_id, podcast, start_time_sec, end_time_sec, text, speaker_label, rank, headline FROM search_moments(%s, %s, 0, %s, %s)",
-                (q.strip(), limit, podcast, video_id),
+                f"""
+                SELECT id, video_id, podcast, start_time_sec, end_time_sec, text, speaker_label,
+                       ts_rank(fts, plainto_tsquery('english', %s)) AS rank,
+                       ts_headline('english', text, plainto_tsquery('english', %s),
+                           'MaxFragments=1,MaxWords=25,MinWords=10') AS headline
+                FROM segments
+                WHERE {" AND ".join(seg_where)}
+                ORDER BY rank DESC
+                LIMIT %s
+                """,
+                [q.strip(), q.strip()] + seg_params,
             )
             for row in cur.fetchall():
                 hits.append({
