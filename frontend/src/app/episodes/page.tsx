@@ -92,6 +92,13 @@ function EpisodeCard({ episode }: { episode: Episode }) {
               alt={episode.title}
               className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
             />
+          ) : episode.podcast && (episode.podcast === "marketing_operator" || episode.podcast === "finance_operators") ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={`/podcasts/${episode.podcast}.avif`}
+              alt={getPodcastDisplayName(episode.podcast)}
+              className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity"
+            />
           ) : (
             <div className={`w-full h-full flex items-center justify-center ${styles.badge}`}>
               <PlayCircle className="h-12 w-12 opacity-60" />

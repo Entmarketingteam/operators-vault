@@ -1753,14 +1753,12 @@ def chat(
     _: dict = Depends(_verify_supabase_jwt),
 ):
     """Ask the vault: search for relevant excerpts, then LLM reply with citations. Requires Bearer token."""
-    import anthropic
     msg = (body.message or "").strip()
     if not msg:
         raise HTTPException(status_code=400, detail="message required")
     db_url = os.environ.get("DATABASE_URL")
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not db_url or not api_key:
-        raise HTTPException(status_code=503, detail="DATABASE_URL or ANTHROPIC_API_KEY not set")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     # Search for relevant context
     search_result = _search_postgres(msg, limit=body.context_limit, type_="all")
     hits = search_result.get("hits") or []
@@ -1781,17 +1779,21 @@ def chat(
         "If the excerpts do not contain relevant information, say so briefly."
     )
     user_content = f"Context from the vault:\n\n{context}\n\nQuestion: {msg}"
+    agent_key = os.environ.get("AGENT_SERVER_API_KEY", "")
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-        r = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
-            system=system,
-            messages=[{"role": "user", "content": user_content}],
+        headers = {"Content-Type": "application/json"}
+        if agent_key:
+            headers["Authorization"] = f"Bearer {agent_key}"
+        full_prompt = f"System: {system}\n\n{user_content}"
+        agent_res = requests.post(
+            "https://ent-agent-server-production.up.railway.app/complete",
+            json={"prompt": full_prompt, "max_tokens": 1024},
+            headers=headers,
+            timeout=90,
         )
-        reply = ""
-        if r.content and len(r.content) > 0 and hasattr(r.content[0], "text"):
-            reply = r.content[0].text
+        agent_res.raise_for_status()
+        data = agent_res.json()
+        reply = data.get("text") or data.get("completion") or data.get("content") or ""
         sources = [
             {
                 "id": h.get("id"),
@@ -2573,13 +2575,9 @@ def topic_guide(body: TopicGuideRequest):
     then compiling insights into a structured markdown guide via Haiku.
     Public — no auth required.
     """
-    import anthropic
     topic = (body.topic or "").strip()
     if not topic:
         raise HTTPException(status_code=400, detail="topic required")
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY not set")
 
     # Search all content types for this topic
     results = _search_postgres(topic, limit=15, type_="all")
@@ -2623,14 +2621,22 @@ def topic_guide(body: TopicGuideRequest):
         f"Write the guide now:"
     )
 
+    agent_key = os.environ.get("AGENT_SERVER_API_KEY", "")
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-        r = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=1500,
-            messages=[{"role": "user", "content": prompt}],
+        headers = {"Content-Type": "application/json"}
+        if agent_key:
+            headers["Authorization"] = f"Bearer {agent_key}"
+        agent_res = requests.post(
+            "https://ent-agent-server-production.up.railway.app/complete",
+            json={"prompt": prompt, "max_tokens": 1500},
+            headers=headers,
+            timeout=90,
         )
-        content = r.content[0].text if r.content else ""
+        agent_res.raise_for_status()
+        data = agent_res.json()
+        content = data.get("text") or data.get("completion") or data.get("content") or ""
+        if not content:
+            raise ValueError(f"Empty response from agent server: {data}")
         return {"topic": topic, "content": content, "sources": sources[:10], "ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Guide generation failed: {e!s}")
