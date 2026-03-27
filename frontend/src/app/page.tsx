@@ -6,41 +6,131 @@ import { searchInsights, type Insight } from "@/lib/api";
 import {
   Search, Loader2, Sparkles, BookOpen, Users, Lightbulb,
   Quote, BookMarked, MessageSquare, Layers, Play, Mail,
-  Podcast, ExternalLink, TrendingUp, Wrench, Target,
+  Podcast, ExternalLink, TrendingUp, TrendingDown, Wrench, Target,
   DollarSign, ShoppingCart, Megaphone, BarChart2, Package,
-  RefreshCw, Star, ChevronRight, X
+  RefreshCw, Star, X, Monitor, Gift, AlertTriangle,
+  Inbox, MailOpen, Activity, Zap, Building2, FileText,
+  PieChart, CreditCard, Clock, LayoutGrid
 } from "lucide-react";
 import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
 import { signInWithGoogle } from "@/lib/supabase";
 
-// ─── Constants ────────────────────────────────────────────────────────────────
+// ─── Topic Groups (organized into sections) ────────────────────────────────
 
-// Content types (map to DB categories)
-const CONTENT_TYPES = [
-  { label: "All Content",       value: "",                          icon: Layers,       color: "slate"   },
-  { label: "Frameworks",        value: "Frameworks and exercises",  icon: Lightbulb,    color: "amber"   },
-  { label: "Tactical Recs",     value: "Tactical recommendations",  icon: Target,       color: "indigo"  },
-  { label: "Points of View",    value: "Points of view",            icon: MessageSquare,color: "rose"    },
-  { label: "Quotes",            value: "Quotes",                    icon: Quote,        color: "violet"  },
-  { label: "Stories",           value: "Stories and case studies",  icon: BookMarked,   color: "emerald" },
-  { label: "Tools & Products",  value: "Tools and products",        icon: Wrench,       color: "sky"     },
+interface Topic {
+  label: string;
+  query: string;
+  icon: React.ComponentType<{ className?: string }>;
+  color: string;
+}
+
+interface TopicGroup {
+  section: string;
+  sectionColor: string;
+  topics: Topic[];
+}
+
+const TOPIC_GROUPS: TopicGroup[] = [
+  {
+    section: "Unit Economics & True Metrics",
+    sectionColor: "emerald",
+    topics: [
+      { label: "MER",                   query: "marketing efficiency ratio blended return all channels true performance",         icon: TrendingUp,     color: "emerald" },
+      { label: "nCAC / Blended CAC",    query: "new customer acquisition cost blended cac true cost payback per buyer",           icon: DollarSign,     color: "emerald" },
+      { label: "LTV:nCAC Ratio",        query: "lifetime value cac ratio ltv ncac profitable long-term customer acquisition",     icon: BarChart2,      color: "teal"    },
+      { label: "Net Profit",            query: "net profit bottom line profitability ebitda operating margin p&l",                icon: PieChart,       color: "green"   },
+      { label: "Contribution Margin",   query: "contribution margin unit economics cm1 cm2 prophit growth profitability",         icon: Activity,       color: "green"   },
+      { label: "Payback Period",        query: "payback period acquisition cost recover break even subscription upfront",         icon: Clock,          color: "teal"    },
+      { label: "Incrementality",        query: "incrementality lift test holdout attribution media mix model measurement",        icon: Layers,         color: "sky"     },
+      { label: "ROAS vs Real Metrics",  query: "roas vanity metric marketing efficiency true blended channel rethink reporting",  icon: AlertTriangle,  color: "amber"   },
+      { label: "Cash Conversion Cycle", query: "cash conversion cycle working capital supplier terms negative cash inventory",    icon: RefreshCw,      color: "teal"    },
+      { label: "Revenue Quality",       query: "quality of revenue hierarchy recurring subscription repeat consumable one-time",  icon: TrendingUp,     color: "green"   },
+    ]
+  },
+  {
+    section: "Email & SMS",
+    sectionColor: "violet",
+    topics: [
+      { label: "Email Marketing",       query: "email marketing campaign strategy dtc revenue roi channel",                      icon: Mail,           color: "violet"  },
+      { label: "Welcome Flow",          query: "welcome flow onboarding new subscriber first email lifestyle sequence structure", icon: MailOpen,       color: "violet"  },
+      { label: "Abandoned Cart",        query: "abandoned cart browse abandonment recovery email sequence",                      icon: ShoppingCart,   color: "violet"  },
+      { label: "Win-Back / Re-engage",  query: "winback win-back re-engage churned subscriber lapsed customer recovery",        icon: RefreshCw,      color: "blue"    },
+      { label: "Email Segmentation",    query: "segmentation engaged subscribers list hygiene behavioral signals vip",           icon: Users,          color: "blue"    },
+      { label: "Email Deliverability",  query: "deliverability open rate inbox placement sender reputation list health",         icon: Inbox,          color: "sky"     },
+      { label: "SMS Marketing",         query: "sms text message marketing vip access urgency postscript recart klaviyo",        icon: MessageSquare,  color: "indigo"  },
+      { label: "Klaviyo / ESP Setup",   query: "klaviyo email platform flow automation trigger lifecycle segmentation",          icon: Zap,            color: "indigo"  },
+      { label: "Send Cadence & Timing", query: "send frequency cadence timing over-messaging inbox fatigue list health volume",  icon: Clock,          color: "slate"   },
+    ]
+  },
+  {
+    section: "Retention & Subscription",
+    sectionColor: "emerald",
+    topics: [
+      { label: "Retention Strategy",   query: "retention strategy repeat purchase customer loyalty lifecycle every touchpoint",  icon: RefreshCw,      color: "emerald" },
+      { label: "Subscription Models",  query: "subscription recurring revenue model pricing hierarchy cancel flow churn",        icon: CreditCard,     color: "emerald" },
+      { label: "Churn Prevention",     query: "churn prevention cancel save flow predictive winback before customers leave",    icon: TrendingDown,   color: "rose"    },
+      { label: "Post-Purchase Upsell", query: "post purchase upsell cross sell order bump thank you page aftersell rebuy",      icon: ShoppingCart,   color: "teal"    },
+      { label: "LTV & CLV",           query: "ltv clv customer lifetime value cohort repurchase rate first order profitability", icon: TrendingUp,     color: "emerald" },
+      { label: "Subscription Pricing", query: "subscription pricing quarterly 90-day upfront unit economics payback aggressive", icon: DollarSign,    color: "teal"    },
+      { label: "VIP & Loyalty",        query: "vip loyalty high value behavior create experiences repeat customer rewards",      icon: Star,           color: "amber"   },
+    ]
+  },
+  {
+    section: "Paid Acquisition",
+    sectionColor: "blue",
+    topics: [
+      { label: "Paid Social / Meta",   query: "paid social meta facebook ads scaling ad account cpm cpa budget",               icon: BarChart2,      color: "blue"    },
+      { label: "Creative Testing",     query: "creative testing marpipe hooks thumb stop rate ad fatigue performance brief",    icon: Lightbulb,      color: "indigo"  },
+      { label: "Video Ads & UGC",      query: "video ads ugc motion hook scroll-stopping content production creator",           icon: Play,           color: "violet"  },
+      { label: "CTV / Connected TV",   query: "connected tv roku streaming ads ctv advertorial format test",                   icon: Monitor,        color: "sky"     },
+      { label: "Attribution Setup",    query: "attribution setup northbeam triple whale reporting pixel multi-touch",           icon: Target,         color: "rose"    },
+      { label: "Media Mix / MMM",      query: "media mix model mmm channel allocation budget efficiency holdout test",         icon: PieChart,       color: "amber"   },
+    ]
+  },
+  {
+    section: "Growth & Brand",
+    sectionColor: "amber",
+    topics: [
+      { label: "Product Launch",       query: "product launch new product checklist pre-launch sequence strategy go-to-market", icon: Package,        color: "amber"   },
+      { label: "Giveaways",            query: "giveaway contest mechanics brand partnership collaboration explicit entry",       icon: Gift,           color: "rose"    },
+      { label: "Brand Collaborations", query: "brand collaboration partnership limited edition collab co-brand",                icon: Building2,      color: "rose"    },
+      { label: "AOV & Bundle Strategy",query: "average order value bundle upsell cross sell cogs arbitrage offer structure",   icon: LayoutGrid,     color: "teal"    },
+      { label: "Pricing & Offers",     query: "pricing offer discount urgency promotion conversion first purchase incentive",   icon: DollarSign,     color: "amber"   },
+      { label: "Influencer / Creator", query: "influencer creator ugc affiliate ambassador seeding campaign",                  icon: Megaphone,      color: "rose"    },
+      { label: "IRL Events & Content", query: "irl events pop-up experiential content engine brand moment community",          icon: Star,           color: "yellow"  },
+      { label: "D2C vs Wholesale",     query: "wholesale retail amazon channel mix d2c versus retail strategy",                icon: ShoppingCart,   color: "slate"   },
+    ]
+  },
+  {
+    section: "Operations & Finance",
+    sectionColor: "slate",
+    topics: [
+      { label: "Cash Flow & Inventory", query: "cash flow inventory working capital trapped capital supplier payment terms",     icon: TrendingUp,     color: "green"   },
+      { label: "Forecasting & P&L",    query: "forecast forecasting daily metric targeting planning predictable growth p&l",    icon: FileText,       color: "slate"   },
+      { label: "Revenue Milestones",   query: "revenue milestone scale 1M 5M 10M 7-figure 8-figure growth stage",              icon: BarChart2,      color: "indigo"  },
+      { label: "Lender / Debt / Covenants", query: "lender covenant debt loan credit line cash risk borrowing",                icon: AlertTriangle,  color: "amber"   },
+      { label: "Shopify & Tech Stack", query: "shopify tech stack app integration platform tools netsuite",                    icon: Wrench,         color: "slate"   },
+      { label: "AI Tools for ECOM",    query: "ai automation tools efficiency creative generation workflow operator",           icon: Sparkles,       color: "fuchsia" },
+      { label: "Agency Operations",    query: "agency media buying team structure operator accountability single model",        icon: Users,          color: "slate"   },
+      { label: "DTC Analytics",        query: "analytics reporting dashboard statlas data integration insights platform",       icon: Activity,       color: "sky"     },
+    ]
+  },
 ];
 
-// ECOM topic quick-selects (trigger keyword search)
-const ECOM_TOPICS = [
-  { label: "Email Marketing",       query: "email marketing retention",              icon: Mail,        color: "violet" },
-  { label: "Paid Social",           query: "paid social facebook meta ads scaling",  icon: BarChart2,   color: "blue"   },
-  { label: "Retention & LTV",       query: "retention ltv customer lifetime value",  icon: RefreshCw,   color: "emerald"},
-  { label: "Product Launch",        query: "product launch new product strategy",    icon: Package,     color: "amber"  },
-  { label: "Influencer / Creator",  query: "influencer creator marketing campaign",  icon: Megaphone,   color: "rose"   },
-  { label: "Brand Building",        query: "brand building dtc identity positioning",icon: Star,        color: "yellow" },
-  { label: "DTC Strategy",          query: "dtc direct to consumer strategy growth", icon: ShoppingCart,color: "indigo" },
-  { label: "Pricing & Offers",      query: "pricing offer discount promotion aov",   icon: DollarSign,  color: "teal"   },
-  { label: "Subscription",          query: "subscription recurring revenue model",   icon: RefreshCw,   color: "sky"    },
-  { label: "Operations",            query: "operations supply chain fulfillment 3pl", icon: Wrench,     color: "slate"  },
-  { label: "Finance & P&L",         query: "finance profit loss margin contribution",icon: TrendingUp,  color: "green"  },
-  { label: "AI & Automation",       query: "ai automation tools efficiency workflow",icon: Sparkles,    color: "fuchsia"},
+// Flat list for lookup
+const ALL_TOPICS = TOPIC_GROUPS.flatMap(g => g.topics);
+
+// ─── Content Type Filters ─────────────────────────────────────────────────
+
+const CONTENT_TYPES = [
+  { label: "All Content",      value: "",                          icon: Layers,      color: "slate"   },
+  { label: "Frameworks",       value: "Frameworks and exercises",  icon: Lightbulb,   color: "amber"   },
+  { label: "Tactical Recs",    value: "Tactical recommendations",  icon: Target,      color: "indigo"  },
+  { label: "Points of View",   value: "Points of view",            icon: MessageSquare,color: "rose"   },
+  { label: "Quotes",           value: "Quotes",                    icon: Quote,       color: "violet"  },
+  { label: "Stories",          value: "Stories and case studies",  icon: BookMarked,  color: "emerald" },
+  { label: "Tools & Products", value: "Tools and products",        icon: Wrench,      color: "sky"     },
 ];
 
 const SOURCE_FILTERS = [
@@ -52,20 +142,30 @@ const SOURCE_FILTERS = [
   { label: "Newsletters",         value: "newsletters" },
 ];
 
-// Color tokens
+// ─── Color tokens ─────────────────────────────────────────────────────────
+
 const colors: Record<string, { pill: string; dot: string; badge: string; text: string }> = {
-  slate:   { pill: "bg-slate-500/15 text-slate-300 border-slate-500/30",   dot: "bg-slate-400",   badge: "bg-slate-500/10 text-slate-300 border-slate-400/20",   text: "text-slate-300"   },
-  amber:   { pill: "bg-amber-500/15 text-amber-300 border-amber-500/30",   dot: "bg-amber-400",   badge: "bg-amber-500/10 text-amber-300 border-amber-400/20",   text: "text-amber-300"   },
-  indigo:  { pill: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30",dot: "bg-indigo-400",  badge: "bg-indigo-500/10 text-indigo-300 border-indigo-400/20", text: "text-indigo-300"  },
-  rose:    { pill: "bg-rose-500/15 text-rose-300 border-rose-500/30",      dot: "bg-rose-400",    badge: "bg-rose-500/10 text-rose-300 border-rose-400/20",       text: "text-rose-300"    },
-  violet:  { pill: "bg-violet-500/15 text-violet-300 border-violet-500/30",dot: "bg-violet-400",  badge: "bg-violet-500/10 text-violet-300 border-violet-400/20", text: "text-violet-300"  },
-  emerald: { pill: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",dot:"bg-emerald-400",badge:"bg-emerald-500/10 text-emerald-300 border-emerald-400/20",text:"text-emerald-300"},
-  sky:     { pill: "bg-sky-500/15 text-sky-300 border-sky-500/30",         dot: "bg-sky-400",     badge: "bg-sky-500/10 text-sky-300 border-sky-400/20",          text: "text-sky-300"     },
-  blue:    { pill: "bg-blue-500/15 text-blue-300 border-blue-500/30",      dot: "bg-blue-400",    badge: "bg-blue-500/10 text-blue-300 border-blue-400/20",       text: "text-blue-300"    },
-  teal:    { pill: "bg-teal-500/15 text-teal-300 border-teal-500/30",      dot: "bg-teal-400",    badge: "bg-teal-500/10 text-teal-300 border-teal-400/20",       text: "text-teal-300"    },
-  green:   { pill: "bg-green-500/15 text-green-300 border-green-500/30",   dot: "bg-green-400",   badge: "bg-green-500/10 text-green-300 border-green-400/20",    text: "text-green-300"   },
-  yellow:  { pill: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",dot: "bg-yellow-400",  badge: "bg-yellow-500/10 text-yellow-300 border-yellow-400/20", text: "text-yellow-300"  },
-  fuchsia: { pill: "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30",dot:"bg-fuchsia-400",badge:"bg-fuchsia-500/10 text-fuchsia-300 border-fuchsia-400/20",text:"text-fuchsia-300"},
+  slate:   { pill: "bg-slate-500/15 text-slate-300 border-slate-500/30",      dot: "bg-slate-400",   badge: "bg-slate-500/10 text-slate-300 border-slate-400/20",    text: "text-slate-300"   },
+  amber:   { pill: "bg-amber-500/15 text-amber-300 border-amber-500/30",      dot: "bg-amber-400",   badge: "bg-amber-500/10 text-amber-300 border-amber-400/20",    text: "text-amber-300"   },
+  indigo:  { pill: "bg-indigo-500/15 text-indigo-300 border-indigo-500/30",   dot: "bg-indigo-400",  badge: "bg-indigo-500/10 text-indigo-300 border-indigo-400/20",  text: "text-indigo-300"  },
+  rose:    { pill: "bg-rose-500/15 text-rose-300 border-rose-500/30",         dot: "bg-rose-400",    badge: "bg-rose-500/10 text-rose-300 border-rose-400/20",        text: "text-rose-300"    },
+  violet:  { pill: "bg-violet-500/15 text-violet-300 border-violet-500/30",   dot: "bg-violet-400",  badge: "bg-violet-500/10 text-violet-300 border-violet-400/20",  text: "text-violet-300"  },
+  emerald: { pill: "bg-emerald-500/15 text-emerald-300 border-emerald-500/30",dot: "bg-emerald-400", badge: "bg-emerald-500/10 text-emerald-300 border-emerald-400/20",text: "text-emerald-300" },
+  sky:     { pill: "bg-sky-500/15 text-sky-300 border-sky-500/30",            dot: "bg-sky-400",     badge: "bg-sky-500/10 text-sky-300 border-sky-400/20",           text: "text-sky-300"     },
+  blue:    { pill: "bg-blue-500/15 text-blue-300 border-blue-500/30",         dot: "bg-blue-400",    badge: "bg-blue-500/10 text-blue-300 border-blue-400/20",        text: "text-blue-300"    },
+  teal:    { pill: "bg-teal-500/15 text-teal-300 border-teal-500/30",         dot: "bg-teal-400",    badge: "bg-teal-500/10 text-teal-300 border-teal-400/20",        text: "text-teal-300"    },
+  green:   { pill: "bg-green-500/15 text-green-300 border-green-500/30",      dot: "bg-green-400",   badge: "bg-green-500/10 text-green-300 border-green-400/20",     text: "text-green-300"   },
+  yellow:  { pill: "bg-yellow-500/15 text-yellow-300 border-yellow-500/30",   dot: "bg-yellow-400",  badge: "bg-yellow-500/10 text-yellow-300 border-yellow-400/20",  text: "text-yellow-300"  },
+  fuchsia: { pill: "bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30",dot: "bg-fuchsia-400", badge: "bg-fuchsia-500/10 text-fuchsia-300 border-fuchsia-400/20",text: "text-fuchsia-300" },
+};
+
+const sectionAccent: Record<string, string> = {
+  emerald: "text-emerald-400",
+  violet:  "text-violet-400",
+  blue:    "text-blue-400",
+  amber:   "text-amber-400",
+  slate:   "text-slate-400",
+  green:   "text-green-400",
 };
 
 function getCategoryColor(category?: string): string {
@@ -90,7 +190,7 @@ function getPodcastShortName(podcast?: string): string {
   return podcast ? (map[podcast.toLowerCase()] || podcast) : "";
 }
 
-// ─── Spotlight Card (featured insight) ────────────────────────────────────────
+// ─── Spotlight Card ────────────────────────────────────────────────────────
 
 function SpotlightCard({ insight, label }: { insight: Insight; label: string }) {
   const speaker = insight.speaker_name || insight.speaker;
@@ -104,7 +204,6 @@ function SpotlightCard({ insight, label }: { insight: Insight; label: string }) 
 
   const content = (
     <div className={`vault-card p-6 mb-6 border ${c.pill.split(" ")[2]} relative overflow-hidden group cursor-pointer`}>
-      {/* BG gradient */}
       <div className={`absolute inset-0 opacity-5 ${c.pill.split(" ")[0]}`} />
       <div className="relative">
         <div className="flex items-center gap-2 mb-3">
@@ -145,7 +244,7 @@ function SpotlightCard({ insight, label }: { insight: Insight; label: string }) 
   ) : <div>{content}</div>;
 }
 
-// ─── Insight Row ──────────────────────────────────────────────────────────────
+// ─── Insight Row ──────────────────────────────────────────────────────────
 
 function InsightRow({ insight }: { insight: Insight }) {
   const speaker = insight.speaker_name || insight.speaker;
@@ -169,7 +268,7 @@ function InsightRow({ insight }: { insight: Insight }) {
           </span>
           {insight.category && (
             <span className={`text-[11px] px-1.5 py-0.5 rounded border ${c.badge}`}>
-              {insight.category.replace("and", "&").replace("and perspectives","").replace("and exercises","").replace("and case studies","")}
+              {insight.category.replace("and", "&").replace("perspectives","").replace("exercises","").replace("case studies","")}
             </span>
           )}
         </div>
@@ -202,7 +301,7 @@ function InsightRow({ insight }: { insight: Insight }) {
     : inner;
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// ─── Main Page ────────────────────────────────────────────────────────────
 
 export default function HomePage() {
   const [query, setQuery] = useState("");
@@ -274,7 +373,7 @@ export default function HomePage() {
     doSearch(query, source, typeFilter, session?.access_token);
   };
 
-  const handleTopic = (topic: typeof ECOM_TOPICS[0]) => {
+  const handleTopic = (topic: Topic) => {
     const next = activeTopic === topic.label ? "" : topic.label;
     setActiveTopic(next);
     setTypeFilter("");
@@ -290,7 +389,8 @@ export default function HomePage() {
 
   const handleSource = (src: string) => {
     setSource(src);
-    doSearch(query || activeTopic ? (query || ECOM_TOPICS.find(t => t.label === activeTopic)?.query || "") : "", src, typeFilter, session?.access_token);
+    const activeTopicQuery = ALL_TOPICS.find(t => t.label === activeTopic)?.query;
+    doSearch(query || activeTopicQuery || "", src, typeFilter, session?.access_token);
   };
 
   const clearAll = () => {
@@ -302,7 +402,6 @@ export default function HomePage() {
   const spotlight = results[0];
   const listResults = results.slice(1);
 
-  // Count type per current dataset
   const typeCounts = CONTENT_TYPES.slice(1).reduce((acc, t) => {
     acc[t.value] = results.filter(r => r.category?.toLowerCase().includes(t.value.split(" ")[0].toLowerCase())).length;
     return acc;
@@ -312,31 +411,35 @@ export default function HomePage() {
     <div className="flex min-h-[calc(100vh-4rem)]">
 
       {/* ─── Sidebar ──────────────────────────────────────────────────────── */}
-      <aside className="hidden lg:flex flex-col w-60 shrink-0 border-r border-[var(--border)] py-5 px-3 gap-5 sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto">
+      <aside className="hidden lg:flex flex-col w-64 shrink-0 border-r border-[var(--border)] py-5 px-3 gap-6 sticky top-16 h-[calc(100vh-4rem)] overflow-y-auto">
 
-        {/* ECOM Topics */}
-        <div>
-          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] mb-2 px-2">ECOM Topics</div>
-          <div className="space-y-0.5">
-            {ECOM_TOPICS.map((topic) => {
-              const Icon = topic.icon;
-              const c = colors[topic.color] || colors.indigo;
-              const active = activeTopic === topic.label;
-              return (
-                <button
-                  key={topic.label}
-                  onClick={() => handleTopic(topic)}
-                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all text-left ${
-                    active ? `${c.pill} border` : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"
-                  }`}
-                >
-                  <Icon className="h-3 w-3 shrink-0" />
-                  {topic.label}
-                </button>
-              );
-            })}
+        {/* Topic Groups */}
+        {TOPIC_GROUPS.map((group) => (
+          <div key={group.section}>
+            <div className={`text-[10px] font-bold uppercase tracking-widest mb-2 px-2 ${sectionAccent[group.sectionColor] || "text-[var(--muted-foreground)]"}`}>
+              {group.section}
+            </div>
+            <div className="space-y-0.5">
+              {group.topics.map((topic) => {
+                const Icon = topic.icon;
+                const c = colors[topic.color] || colors.indigo;
+                const active = activeTopic === topic.label;
+                return (
+                  <button
+                    key={topic.label}
+                    onClick={() => handleTopic(topic)}
+                    className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all text-left ${
+                      active ? `${c.pill} border` : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"
+                    }`}
+                  >
+                    <Icon className="h-3 w-3 shrink-0" />
+                    {topic.label}
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        ))}
 
         {/* Content Type */}
         <div>
@@ -391,7 +494,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Tools */}
+        {/* AI Tools */}
         <div>
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] mb-2 px-2">AI Tools</div>
           <div className="space-y-0.5">
@@ -425,7 +528,7 @@ export default function HomePage() {
             <input
               ref={searchRef}
               type="text"
-              placeholder='Search insights… or press "/" to focus'
+              placeholder='Search insights… press "/" to focus'
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="w-full h-10 pl-10 pr-4 rounded-xl border border-[var(--border)] bg-[var(--secondary)] text-sm placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500/50 transition-all"
@@ -433,16 +536,25 @@ export default function HomePage() {
           </div>
         </form>
 
-        {/* Mobile ECOM topic chips */}
-        <div className="lg:hidden flex flex-wrap gap-1.5 mb-4">
-          {ECOM_TOPICS.map((topic) => {
-            const c = colors[topic.color] || colors.indigo;
-            return (
-              <button key={topic.label} onClick={() => handleTopic(topic)}
-                className={`text-xs px-2.5 py-1 rounded-full border transition-all ${activeTopic === topic.label ? `${c.pill}` : "border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
-              >{topic.label}</button>
-            );
-          })}
+        {/* Mobile: scrollable topic chips grouped */}
+        <div className="lg:hidden mb-4 space-y-3">
+          {TOPIC_GROUPS.map((group) => (
+            <div key={group.section}>
+              <div className={`text-[10px] font-bold uppercase tracking-wider mb-1.5 ${sectionAccent[group.sectionColor] || "text-[var(--muted-foreground)]"}`}>
+                {group.section}
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {group.topics.map((topic) => {
+                  const c = colors[topic.color] || colors.indigo;
+                  return (
+                    <button key={topic.label} onClick={() => handleTopic(topic)}
+                      className={`text-xs px-2.5 py-1 rounded-full border transition-all ${activeTopic === topic.label ? `${c.pill}` : "border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
+                    >{topic.label}</button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
 
         {/* Mobile type chips */}
@@ -500,7 +612,7 @@ export default function HomePage() {
           <div className="flex items-center justify-between mb-4">
             <span className="text-xs text-[var(--muted-foreground)]">
               {results.length} insight{results.length !== 1 ? "s" : ""}
-              {activeTopic ? ` on ${activeTopic}` : typeFilter ? ` · ${CONTENT_TYPES.find(t=>t.value===typeFilter)?.label}` : ""}
+              {activeTopic ? ` on ${activeTopic}` : typeFilter ? ` · ${CONTENT_TYPES.find(t => t.value === typeFilter)?.label}` : ""}
             </span>
             {!session && sessionLoaded && (
               <button onClick={() => signInWithGoogle()} className="text-xs text-indigo-400 hover:underline hidden sm:inline">
@@ -526,15 +638,12 @@ export default function HomePage() {
           </div>
         ) : (
           <>
-            {/* Spotlight */}
             {spotlight && hasFilters && (
               <SpotlightCard
                 insight={spotlight}
                 label={activeTopic || CONTENT_TYPES.find(t => t.value === typeFilter)?.label || "Top Result"}
               />
             )}
-
-            {/* List */}
             <div className="space-y-1">
               {(hasFilters ? listResults : results).map((insight, i) => (
                 <InsightRow key={insight.id || i} insight={insight} />
