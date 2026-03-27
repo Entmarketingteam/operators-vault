@@ -71,6 +71,15 @@ body {
   box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.3), 0 4px 32px rgba(99, 102, 241, 0.08);
 }
 
+/* Mobile: remove tap highlight, hide scrollbar utility */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* Prose for markdown */
 .prose-vault h1 { font-size: 1.875rem; font-weight: 700; margin-bottom: 1rem; color: var(--foreground); }
 .prose-vault h2 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.75rem; margin-top: 2rem; color: var(--foreground); }

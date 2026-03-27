@@ -258,7 +258,7 @@ function InsightRow({ insight }: { insight: Insight }) {
   const isNewsletter = !insight.podcast && (insight.author || insight.source);
 
   const inner = (
-    <div className="group flex items-start gap-3 px-4 py-3.5 vault-card hover:border-indigo-500/30 transition-all cursor-pointer">
+    <div className="group flex items-start gap-3 px-4 py-4 sm:py-3.5 vault-card hover:border-indigo-500/30 transition-all cursor-pointer">
       <div className={`shrink-0 mt-2 h-1.5 w-1.5 rounded-full ${c.dot}`} />
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-1.5 mb-1">
@@ -519,7 +519,7 @@ export default function HomePage() {
       </aside>
 
       {/* ─── Main ─────────────────────────────────────────────────────────── */}
-      <div className="flex-1 min-w-0 px-4 sm:px-6 py-5">
+      <div className="flex-1 min-w-0 px-4 sm:px-5 lg:px-6 py-4 sm:py-5">
 
         {/* Search */}
         <form onSubmit={handleSearch} className="mb-4">
@@ -528,28 +528,35 @@ export default function HomePage() {
             <input
               ref={searchRef}
               type="text"
-              placeholder='Search insights… press "/" to focus'
+              placeholder='Search insights…'
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              className="w-full h-10 pl-10 pr-4 rounded-xl border border-[var(--border)] bg-[var(--secondary)] text-sm placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500/50 transition-all"
+              className="w-full h-11 sm:h-10 pl-10 pr-4 rounded-xl border border-[var(--border)] bg-[var(--secondary)] text-sm placeholder:text-[var(--muted-foreground)] focus:outline-none focus:ring-2 focus:ring-indigo-500/40 focus:border-indigo-500/50 transition-all"
             />
           </div>
         </form>
 
-        {/* Mobile: scrollable topic chips grouped */}
-        <div className="lg:hidden mb-4 space-y-3">
+        {/* Mobile: horizontal-scroll topic rows per section */}
+        <div className="lg:hidden mb-3 space-y-2">
           {TOPIC_GROUPS.map((group) => (
             <div key={group.section}>
-              <div className={`text-[10px] font-bold uppercase tracking-wider mb-1.5 ${sectionAccent[group.sectionColor] || "text-[var(--muted-foreground)]"}`}>
+              <div className={`text-[10px] font-bold uppercase tracking-wider mb-1.5 px-0.5 ${sectionAccent[group.sectionColor] || "text-[var(--muted-foreground)]"}`}>
                 {group.section}
               </div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide" style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}>
                 {group.topics.map((topic) => {
                   const c = colors[topic.color] || colors.indigo;
+                  const active = activeTopic === topic.label;
                   return (
-                    <button key={topic.label} onClick={() => handleTopic(topic)}
-                      className={`text-xs px-2.5 py-1 rounded-full border transition-all ${activeTopic === topic.label ? `${c.pill}` : "border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
-                    >{topic.label}</button>
+                    <button
+                      key={topic.label}
+                      onClick={() => handleTopic(topic)}
+                      className={`flex-shrink-0 text-xs px-3 py-2 rounded-full border transition-all whitespace-nowrap ${
+                        active ? `${c.pill}` : "border-[var(--border)] text-[var(--muted-foreground)]"
+                      }`}
+                    >
+                      {topic.label}
+                    </button>
                   );
                 })}
               </div>
@@ -557,21 +564,30 @@ export default function HomePage() {
           ))}
         </div>
 
-        {/* Mobile type chips */}
-        <div className="lg:hidden flex flex-wrap gap-1.5 mb-4">
-          {CONTENT_TYPES.map(({ label, value, color }) => {
-            const c = colors[color];
-            return (
-              <button key={value} onClick={() => handleType(value)}
-                className={`text-xs px-2.5 py-1 rounded-full border transition-all ${typeFilter === value ? `${c.pill}` : "border-[var(--border)] text-[var(--muted-foreground)]"}`}
-              >{label}</button>
-            );
-          })}
+        {/* Mobile type chips — horizontal scroll */}
+        <div className="lg:hidden mb-3">
+          <div className="text-[10px] font-bold uppercase tracking-wider mb-1.5 text-[var(--muted-foreground)]">Content Type</div>
+          <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}>
+            {CONTENT_TYPES.map(({ label, value, color }) => {
+              const c = colors[color];
+              return (
+                <button
+                  key={value}
+                  onClick={() => handleType(value)}
+                  className={`flex-shrink-0 text-xs px-3 py-2 rounded-full border transition-all whitespace-nowrap ${
+                    typeFilter === value ? `${c.pill}` : "border-[var(--border)] text-[var(--muted-foreground)]"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
         </div>
 
         {/* Active filter bar */}
         {hasFilters && (
-          <div className="flex flex-wrap items-center gap-2 mb-4 text-xs">
+          <div className="flex flex-wrap items-center gap-2 mb-3 text-xs">
             <span className="text-[var(--muted-foreground)]">Filtered by:</span>
             {activeTopic && (
               <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-white/5 border border-[var(--border)]">

@@ -42,9 +42,9 @@ export default function Navbar() {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-600/20 border border-indigo-500/30 group-hover:bg-indigo-600/30 transition-colors">
               <ShoppingBag className="h-4 w-4 text-indigo-400" />
             </div>
-            <span className="font-bold text-base tracking-tight leading-none">
+            <span className="font-bold text-sm sm:text-base tracking-tight leading-none">
               <span className="text-indigo-400">ECOM</span>{" "}
-              <span className="text-[var(--foreground)]">Operators</span>{" "}
+              <span className="text-[var(--foreground)] hidden sm:inline">Operators</span>{" "}
               <span className="text-violet-400">Vault</span>
             </span>
           </Link>
