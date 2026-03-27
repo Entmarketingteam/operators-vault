@@ -173,7 +173,7 @@ const sectionAccent: Record<string, string> = {
 function getCategoryColor(category?: string): string {
   const c = (category || "").toLowerCase();
   if (c.includes("framework")) return "amber";
-  if (c.includes("tactical")) return "indigo";
+  if (c.includes("tactical")) return "blue";
   if (c.includes("pov") || c.includes("perspective") || c.includes("point")) return "rose";
   if (c.includes("quote")) return "violet";
   if (c.includes("stor") || c.includes("anecdote") || c.includes("case")) return "emerald";
