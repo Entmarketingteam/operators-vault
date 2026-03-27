@@ -81,6 +81,9 @@ def _parse_insight_block(block: str, category: str) -> list[dict[str, str]]:
         if not line or not line.startswith("*"):
             continue
         line = line[1:].strip()
+        # Skip (none) placeholder lines
+        if re.match(r"^\(none", line, re.IGNORECASE):
+            continue
         # Quote: * "Quote" – Person
         mq = re.match(r'^"([^"]+)"\s*[–—\-]\s*(.+)$', line)
         if mq:
@@ -103,6 +106,10 @@ _VALID_CATEGORIES = {
     "Quotes",
     "Tools and products",
     "Creator and Influencer Tactics",
+    # Aliases used by the operators prompt template
+    "Business ideas",
+    "Stories and anecdotes",
+    "Products",
 }
 
 def _normalize_category(raw: str) -> str:
@@ -131,7 +138,7 @@ def parse_extract_insights_output(text: str) -> list[dict[str, str]]:
     blocks = re.split(r"\n---+\n", t)
     for block in blocks:
         block = block.strip()
-        if not block or "(none)" in block.lower():
+        if not block:
             continue
         lines = block.splitlines()
         if not lines:
