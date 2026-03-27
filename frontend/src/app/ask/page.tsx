@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Send, Loader2, ChevronDown, ChevronUp, Vault, User, Bot } from "lucide-react";
 import type { Session } from "@supabase/supabase-js";
 import { cn } from "@/lib/utils";
+import { haptic } from "@/lib/haptics";
 
 interface Message {
   role: "user" | "assistant";
@@ -30,14 +31,14 @@ function SourcesPanel({ sources }: { sources: Insight[] }) {
   return (
     <div className="mt-3">
       <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 text-xs text-[var(--muted-foreground)] hover:text-indigo-300 transition-colors"
+        onClick={() => { haptic("selection"); setOpen(!open); }}
+        className="btn-base flex items-center gap-2 text-xs text-[var(--muted-foreground)] hover:text-indigo-300"
       >
         <span>{sources.length} source{sources.length !== 1 ? "s" : ""}</span>
         {open ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
       </button>
       {open && (
-        <div className="mt-2 space-y-2">
+        <div className="mt-2 space-y-2 animate-fade-in-up">
           {sources.map((s, i) => (
             <div key={i} className="vault-card p-3 text-xs">
               <div className="font-medium text-[var(--foreground)] mb-0.5 line-clamp-1">{s.title}</div>
@@ -59,7 +60,7 @@ function MessageBubble({ message }: { message: Message }) {
   const isUser = message.role === "user";
 
   return (
-    <div className={cn("flex gap-3", isUser ? "flex-row-reverse" : "flex-row")}>
+    <div className={cn("flex gap-3 animate-fade-in-up", isUser ? "flex-row-reverse" : "flex-row")}>
       {/* Avatar */}
       <div className={cn(
         "shrink-0 h-8 w-8 rounded-full flex items-center justify-center mt-0.5",
@@ -81,16 +82,28 @@ function MessageBubble({ message }: { message: Message }) {
             ? "bg-indigo-600/20 border border-indigo-500/30 text-[var(--foreground)]"
             : "bg-[var(--card)] border border-[var(--border)] text-[var(--foreground)]"
         )}>
-          {message.content.split("\n").map((line, i) => (
-            <span key={i}>
-              {line}
-              {i < message.content.split("\n").length - 1 && <br />}
-            </span>
+          {message.content.split("\n").map((line, i, arr) => (
+            <span key={i}>{line}{i < arr.length - 1 && <br />}</span>
           ))}
         </div>
         {!isUser && message.sources && (
           <SourcesPanel sources={message.sources} />
         )}
+      </div>
+    </div>
+  );
+}
+
+function TypingIndicator() {
+  return (
+    <div className="flex gap-3 animate-fade-in">
+      <div className="shrink-0 h-8 w-8 rounded-full bg-violet-600/20 border border-violet-500/30 flex items-center justify-center">
+        <Bot className="h-4 w-4 text-violet-400" />
+      </div>
+      <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl px-5 py-4 flex items-center gap-1.5">
+        <span className="h-2 w-2 rounded-full bg-violet-400 dot-bounce-1" />
+        <span className="h-2 w-2 rounded-full bg-violet-400 dot-bounce-2" />
+        <span className="h-2 w-2 rounded-full bg-violet-400 dot-bounce-3" />
       </div>
     </div>
   );
@@ -116,13 +129,14 @@ export default function AskPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, loading]);
 
   const handleSend = async (e?: React.FormEvent, messageOverride?: string) => {
     e?.preventDefault();
     const text = messageOverride || input;
     if (!text.trim() || loading) return;
 
+    haptic("impact");
     const userMsg: Message = { role: "user", content: text };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
@@ -138,9 +152,11 @@ export default function AskPage() {
         content: response.reply || "I couldn't find a specific answer for that. Try rephrasing or searching the vault directly.",
         sources: response.sources,
       };
+      haptic("success");
       setMessages((prev) => [...prev, assistantMsg]);
     } catch (err) {
       console.error("Chat error:", err);
+      haptic("warning");
       setMessages((prev) => [...prev, {
         role: "assistant",
         content: "Sorry, I ran into an error. Please try again.",
@@ -151,52 +167,49 @@ export default function AskPage() {
   };
 
   return (
-    <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8 py-8 flex flex-col" style={{ height: "calc(100vh - 8rem)" }}>
+    /* Use 100dvh to account for mobile browser chrome */
+    <div
+      className="mx-auto max-w-3xl px-4 sm:px-6 py-4 sm:py-8 flex flex-col"
+      style={{ height: "calc(100dvh - 4rem)" }}
+    >
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6 shrink-0">
+      <div className="flex items-center gap-3 mb-4 sm:mb-6 shrink-0">
         <div className="h-10 w-10 rounded-xl bg-violet-600/20 border border-violet-500/30 flex items-center justify-center">
           <Vault className="h-5 w-5 text-violet-400" />
         </div>
         <div>
-          <h1 className="text-xl font-bold">Ask the Vault</h1>
-          <p className="text-sm text-[var(--muted-foreground)]">Answers grounded in operator knowledge</p>
+          <h1 className="text-lg sm:text-xl font-bold">Ask the Vault</h1>
+          <p className="text-xs sm:text-sm text-[var(--muted-foreground)]">Answers grounded in operator knowledge</p>
         </div>
         {!session && (
-          <Badge variant="secondary" className="ml-auto text-xs">
+          <Badge variant="secondary" className="ml-auto text-xs hidden sm:flex">
             Sign in for video insights
           </Badge>
         )}
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto space-y-6 pb-4">
+      {/* Messages — overscroll-contain prevents body scroll on iOS */}
+      <div
+        className="flex-1 overflow-y-auto space-y-5 pb-4 min-h-0"
+        style={{ overscrollBehavior: "contain" }}
+      >
         {messages.map((msg, i) => (
           <MessageBubble key={i} message={msg} />
         ))}
-        {loading && (
-          <div className="flex gap-3">
-            <div className="shrink-0 h-8 w-8 rounded-full bg-violet-600/20 border border-violet-500/30 flex items-center justify-center">
-              <Bot className="h-4 w-4 text-violet-400" />
-            </div>
-            <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl px-4 py-3 flex items-center gap-2">
-              <Loader2 className="h-4 w-4 animate-spin text-violet-400" />
-              <span className="text-sm text-[var(--muted-foreground)]">Searching the vault...</span>
-            </div>
-          </div>
-        )}
+        {loading && <TypingIndicator />}
         <div ref={bottomRef} />
       </div>
 
-      {/* Starters (shown when only welcome message) */}
-      {messages.length === 1 && (
-        <div className="shrink-0 mb-4">
+      {/* Starters — shown only when only the welcome message exists */}
+      {messages.length === 1 && !loading && (
+        <div className="shrink-0 mb-3 animate-slide-up">
           <div className="text-xs text-[var(--muted-foreground)] mb-2">Try asking:</div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             {STARTER_QUESTIONS.map((q) => (
               <button
                 key={q}
                 onClick={() => handleSend(undefined, q)}
-                className="text-left text-xs p-3 rounded-xl border border-[var(--border)] text-[var(--muted-foreground)] hover:border-indigo-500/40 hover:text-[var(--foreground)] hover:bg-indigo-600/5 transition-all"
+                className="btn-base text-left text-xs p-3 rounded-xl border border-[var(--border)] text-[var(--muted-foreground)] hover:border-indigo-500/40 hover:text-[var(--foreground)] hover:bg-indigo-600/5"
               >
                 {q}
               </button>
@@ -205,18 +218,26 @@ export default function AskPage() {
         </div>
       )}
 
-      {/* Input */}
-      <div className="shrink-0 pt-4 border-t border-[var(--border)]">
+      {/* Input bar */}
+      <div className="shrink-0 pt-3 border-t border-[var(--border)]">
         <form onSubmit={handleSend} className="flex gap-2">
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask anything about DTC strategy..."
-            className="h-11"
+            placeholder="Ask anything about DTC strategy…"
+            className="h-11 sm:h-12 text-sm"
             disabled={loading}
           />
-          <Button type="submit" disabled={loading || !input.trim()} size="icon" className="h-11 w-11 shrink-0">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          <Button
+            type="submit"
+            disabled={loading || !input.trim()}
+            size="icon"
+            className="h-11 w-11 sm:h-12 sm:w-12 shrink-0"
+          >
+            {loading
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <Send className="h-4 w-4" />
+            }
           </Button>
         </form>
       </div>

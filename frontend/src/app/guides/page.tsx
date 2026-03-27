@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Sparkles, Loader2, Copy, Check, BookOpen, Tag, ChevronDown, ChevronUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
+import { haptic } from "@/lib/haptics";
 
 const EXAMPLE_TOPICS = [
   "Product Launch Strategy",
@@ -106,13 +107,16 @@ export default function GuidesPage() {
     e?.preventDefault();
     const t = topicOverride || topic;
     if (!t.trim()) return;
+    haptic("impact");
     setLoading(true);
     setError("");
     setGuide(null);
     try {
       const result = await generateTopicGuide(t.trim());
+      haptic("success");
       setGuide(result);
     } catch (err) {
+      haptic("warning");
       setError("Failed to generate guide. Please try again.");
       console.error(err);
     } finally {
@@ -122,6 +126,7 @@ export default function GuidesPage() {
 
   const handleCopy = () => {
     if (!guide) return;
+    haptic("selection");
     navigator.clipboard.writeText(guide.content);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
@@ -176,11 +181,12 @@ export default function GuidesPage() {
               <button
                 key={t}
                 onClick={() => {
+                  haptic("selection");
                   setTopic(t);
                   handleGenerate(undefined, t);
                 }}
                 disabled={loading}
-                className="text-xs px-3 py-1.5 rounded-full border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-indigo-500/40 hover:bg-indigo-600/10 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                className="btn-base text-xs px-3 py-1.5 rounded-full border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:border-indigo-500/40 hover:bg-indigo-600/10 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Tag className="h-3 w-3 inline mr-1" />
                 {t}
@@ -253,7 +259,7 @@ export default function GuidesPage() {
           <div className="mt-8 pt-6 border-t border-[var(--border)] text-center">
             <Button
               variant="outline"
-              onClick={() => { setGuide(null); setTopic(""); }}
+              onClick={() => { haptic("selection"); setGuide(null); setTopic(""); }}
             >
               Generate Another Guide
             </Button>

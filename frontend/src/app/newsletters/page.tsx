@@ -5,6 +5,7 @@ import { getNewsletterSources, getNewsletterInsights, type NewsletterInsight, ty
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Mail, Search, Loader2, Tag, ChevronDown, ChevronUp, User } from "lucide-react";
+import { haptic } from "@/lib/haptics";
 
 const SOURCE_COLORS: Record<string, { bg: string; text: string; border: string; dot: string }> = {
   nik_sharma:     { bg: "bg-indigo-500/15", text: "text-indigo-300", border: "border-indigo-500/30", dot: "bg-indigo-400" },
@@ -35,8 +36,8 @@ function InsightCard({ insight }: { insight: NewsletterInsight }) {
 
   return (
     <div
-      className="vault-card p-4 cursor-pointer hover:border-indigo-500/40 transition-all"
-      onClick={() => setExpanded(!expanded)}
+      className="vault-card p-4 cursor-pointer"
+      onClick={() => { haptic("selection"); setExpanded(!expanded); }}
     >
       <div className="flex items-start gap-3">
         <div className={`shrink-0 mt-1 h-1.5 w-1.5 rounded-full ${color.dot}`} />
@@ -137,8 +138,8 @@ export default function NewslettersPage() {
       {/* Source filters */}
       <div className="flex flex-wrap gap-2 mb-6">
         <button
-          onClick={() => setActiveSource("")}
-          className={`flex items-center gap-2 px-3.5 py-2 rounded-full text-sm font-medium border transition-all ${
+          onClick={() => { haptic("selection"); setActiveSource(""); }}
+          className={`btn-base flex items-center gap-2 px-3.5 py-2 rounded-full text-sm font-medium border ${
             activeSource === ""
               ? "bg-emerald-600/20 text-emerald-300 border-emerald-500/40"
               : "border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
@@ -152,8 +153,8 @@ export default function NewslettersPage() {
           return (
             <button
               key={src.slug}
-              onClick={() => setActiveSource(src.slug)}
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-full text-sm font-medium border transition-all ${
+              onClick={() => { haptic("selection"); setActiveSource(src.slug); }}
+              className={`btn-base flex items-center gap-2 px-3.5 py-2 rounded-full text-sm font-medium border ${
                 activeSource === src.slug
                   ? `${color.bg} ${color.text} ${color.border}`
                   : "border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
@@ -199,7 +200,7 @@ export default function NewslettersPage() {
         </div>
       ) : categories.length > 1 && !search ? (
         // Grouped by category when browsing
-        <div className="space-y-10">
+        <div className="space-y-10 stagger">
           {categories.map((cat) => {
             const catInsights = filtered.filter(i => i.category === cat);
             return (
@@ -219,7 +220,7 @@ export default function NewslettersPage() {
         </div>
       ) : (
         // Flat list when searching or single source
-        <div className="space-y-2">
+        <div className="space-y-2 stagger">
           {filtered.map((ins) => (
             <InsightCard key={ins.id} insight={ins} />
           ))}

@@ -185,7 +185,7 @@ export async function generateTopicGuide(topic: string): Promise<TopicGuide> {
 
 export async function sendChatMessage(
   message: string,
-  _history: Array<{ role: string; content: string }>,
+  history: Array<{ role: string; content: string }>,
   token?: string
 ): Promise<{ reply: string; citations?: number; sources?: Insight[] }> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -194,7 +194,7 @@ export async function sendChatMessage(
   const res = await fetch(`${API_BASE}/chat`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ message, context_limit: 10 }),
+    body: JSON.stringify({ message, history, context_limit: 20 }),
   });
   if (!res.ok) throw new Error(`Chat failed: ${res.statusText}`);
   return res.json();

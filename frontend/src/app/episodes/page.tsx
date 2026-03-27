@@ -5,6 +5,7 @@ import { getEpisodes, type Episode } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Loader2, Search, PlayCircle, Calendar, Clock } from "lucide-react";
+import { haptic } from "@/lib/haptics";
 
 function getPodcastDisplayName(podcast?: string): string {
   if (!podcast) return "Podcast";
@@ -224,8 +225,8 @@ export default function EpisodesPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => setPodcastFilter("")}
-            className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all border ${
+            onClick={() => { haptic("selection"); setPodcastFilter(""); }}
+            className={`btn-base px-3.5 py-1.5 rounded-full text-xs font-semibold border ${
               podcastFilter === ""
                 ? "bg-violet-600/20 text-violet-300 border-violet-500/40"
                 : "border-[var(--border)] text-[var(--muted-foreground)] hover:border-violet-500/30 hover:text-[var(--foreground)]"
@@ -239,8 +240,8 @@ export default function EpisodesPage() {
             return (
               <button
                 key={p}
-                onClick={() => setPodcastFilter(p || "")}
-                className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition-all border ${
+                onClick={() => { haptic("selection"); setPodcastFilter(p || ""); }}
+                className={`btn-base px-3.5 py-1.5 rounded-full text-xs font-semibold border ${
                   podcastFilter === p
                     ? `${styles.badge}`
                     : "border-[var(--border)] text-[var(--muted-foreground)] hover:border-violet-500/30 hover:text-[var(--foreground)]"
@@ -266,7 +267,7 @@ export default function EpisodesPage() {
           <Loader2 className="h-8 w-8 animate-spin text-violet-400" />
         </div>
       ) : filtered.length > 0 ? (
-        <div className="space-y-4">
+        <div className="space-y-4 stagger">
           {filtered.map((ep) => (
             <EpisodeCard key={ep.id} episode={ep} />
           ))}

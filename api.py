@@ -1742,9 +1742,15 @@ def admin_migrate_host_fields():
 
 # ---------------------------------------------------------------------------
 
+class ChatHistoryMessage(BaseModel):
+    role: str
+    content: str
+
+
 class ChatRequest(BaseModel):
     message: str
-    context_limit: int = 10
+    context_limit: int = 20
+    history: list[ChatHistoryMessage] = []
 
 
 @app.post("/chat")
@@ -1752,33 +1758,75 @@ def chat(
     body: ChatRequest,
     _: dict = Depends(_verify_supabase_jwt),
 ):
-    """Ask the vault: search for relevant excerpts, then LLM reply with citations. Requires Bearer token."""
+    """Ask the vault: search newsletter + podcast excerpts, then LLM reply with operator-grade context."""
     msg = (body.message or "").strip()
     if not msg:
         raise HTTPException(status_code=400, detail="message required")
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
-    # Search for relevant context
+
+    # Search both podcast insights and newsletter insights
     search_result = _search_postgres(msg, limit=body.context_limit, type_="all")
     hits = search_result.get("hits") or []
+
+    # Sort by rank descending, take top N
+    hits = sorted(hits, key=lambda h: float(h.get("rank") or 0), reverse=True)[: body.context_limit]
+
     context_parts = []
-    for h in hits[: body.context_limit]:
-        vid = h.get("video_id") or ""
-        pod = (h.get("podcast") or "").replace("_", " ")
-        start = h.get("start_time_sec")
-        t = h.get("headline_title") or h.get("headline_description") or h.get("text") or h.get("headline") or ""
-        if start is not None:
-            context_parts.append(f"[{pod} | {vid} @ {int(start)}s] {t[:500]}")
+    for h in hits:
+        h_type = h.get("type", "")
+        if h_type == "newsletter_insight":
+            author = h.get("author") or h.get("source") or "Newsletter"
+            title = h.get("headline_title") or h.get("title") or ""
+            desc = h.get("headline_description") or h.get("description") or ""
+            text = f"{title}. {desc}" if desc else title
+            context_parts.append(f"[Newsletter — {author}] {text[:600]}")
         else:
-            context_parts.append(f"[{pod} | {vid}] {t[:500]}")
-    context = "\n\n".join(context_parts) if context_parts else "No matching excerpts found."
-    system = (
-        "You are a helpful assistant answering questions based only on excerpts from the Operators Vault (podcast insights and moments). "
-        "Use only the provided excerpts. When you cite something, mention the show name and approximate timestamp (e.g. '9 Operators @ 12:30'). "
-        "If the excerpts do not contain relevant information, say so briefly."
-    )
-    user_content = f"Context from the vault:\n\n{context}\n\nQuestion: {msg}"
+            pod = (h.get("podcast") or "").replace("_", " ").title()
+            speaker = h.get("speaker_name") or h.get("speaker") or ""
+            start = h.get("start_time_sec")
+            t = h.get("headline_title") or h.get("headline_description") or h.get("headline") or h.get("text") or ""
+            if not pod:
+                pod = "Operators Podcast"
+            label = f"{pod}" + (f" — {speaker}" if speaker else "") + (f" @ {int(start)}s" if start is not None else "")
+            context_parts.append(f"[{label}] {t[:600]}")
+
+    context = "\n\n".join(context_parts) if context_parts else "No matching excerpts found in the vault for this query."
+
+    system = """You are the ECOM Operators Vault AI — a specialized assistant trained on hundreds of hours of content from the world's best 7-, 8-, and 9-figure DTC operators.
+
+Your knowledge base includes:
+- Podcast insights from 9 Operators, Marketing Operators, Finance Operators, and TITANS — featuring the top ecommerce operators in the world
+- Newsletters from Nik Sharma, Taylor Holiday (CTC/Common Thread Collective), Matt Bertulli, Chase Dimond, and the Operators Newsletter
+
+Your role is to give direct, operator-grade, actionable answers — not generic marketing advice. You think in real business terms:
+- True profitability metrics: MER (Marketing Efficiency Ratio), nCAC (new Customer Acquisition Cost), LTV:nCAC ratio, Contribution Margin, Net Profit, Payback Period — NOT just ROAS or CPM
+- Real growth frameworks that 8-figure operators actually use
+- Specific, named strategies with context on who uses them and why
+
+When answering:
+1. Lead with the direct answer or framework — be specific, not vague
+2. Cite operators by name and source: e.g. "Taylor Holiday at CTC has talked about..." or "From Nik Sharma's newsletter..."
+3. Give frameworks with concrete steps or numbers when the context supports it
+4. Explain the "why" — operators don't just follow tactics, they understand first principles
+5. If the question is about metrics, always explain why operators prefer certain metrics over vanity metrics like ROAS
+6. Be direct and confident — channel the voice of operators who've seen what works at scale
+
+Use the provided vault excerpts as your primary source. When excerpts are relevant, synthesize them into a cohesive answer rather than just listing quotes. If the vault doesn't have specific coverage, say so briefly and share your best operator-level thinking on the topic."""
+
+    # Build conversation history for the prompt
+    history_text = ""
+    if body.history:
+        history_lines = []
+        for turn in body.history[-6:]:  # last 6 turns for context
+            role = "User" if turn.role == "user" else "Assistant"
+            history_lines.append(f"{role}: {turn.content}")
+        if history_lines:
+            history_text = "Previous conversation:\n" + "\n".join(history_lines) + "\n\n"
+
+    user_content = f"{history_text}Vault excerpts relevant to this question:\n\n{context}\n\nQuestion: {msg}"
+
     agent_key = os.environ.get("AGENT_SERVER_API_KEY", "")
     try:
         headers = {"Content-Type": "application/json"}
@@ -1787,24 +1835,40 @@ def chat(
         full_prompt = f"System: {system}\n\n{user_content}"
         agent_res = requests.post(
             "https://ent-agent-server-production.up.railway.app/complete",
-            json={"prompt": full_prompt, "max_tokens": 1024},
+            json={"prompt": full_prompt, "max_tokens": 1500},
             headers=headers,
             timeout=90,
         )
         agent_res.raise_for_status()
         data = agent_res.json()
         reply = data.get("text") or data.get("completion") or data.get("content") or ""
-        sources = [
-            {
-                "id": h.get("id"),
-                "title": h.get("headline_title") or h.get("title") or "",
-                "description": h.get("headline_description") or h.get("description") or "",
-                "source": (h.get("podcast") or "").replace("_", " "),
-                "podcast": h.get("podcast"),
-                "category": h.get("category"),
-            }
-            for h in hits[:5]
-        ]
+        sources = []
+        seen_ids = set()
+        for h in hits[:8]:
+            hid = str(h.get("id") or "")
+            if hid in seen_ids:
+                continue
+            seen_ids.add(hid)
+            h_type = h.get("type", "")
+            if h_type == "newsletter_insight":
+                sources.append({
+                    "id": hid,
+                    "title": h.get("title") or h.get("headline_title") or "",
+                    "description": h.get("description") or h.get("headline_description") or "",
+                    "source": "Newsletter",
+                    "author": h.get("author") or h.get("source") or "",
+                    "category": h.get("category"),
+                })
+            else:
+                sources.append({
+                    "id": hid,
+                    "title": h.get("headline_title") or h.get("title") or "",
+                    "description": h.get("headline_description") or h.get("description") or "",
+                    "source": (h.get("podcast") or "").replace("_", " ").title(),
+                    "author": h.get("speaker_name") or h.get("speaker") or "",
+                    "podcast": h.get("podcast"),
+                    "category": h.get("category"),
+                })
         return {"reply": reply, "citations": len(hits), "sources": sources}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat failed: {e!s}")

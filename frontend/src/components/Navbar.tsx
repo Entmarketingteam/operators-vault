@@ -99,7 +99,7 @@ export default function Navbar() {
 
         {/* Mobile menu */}
         {mobileOpen && (
-          <div className="md:hidden py-3 border-t border-[var(--border)]">
+          <div className="md:hidden py-3 border-t border-[var(--border)] animate-slide-down">
             <nav className="flex flex-col gap-1 mb-3">
               {navLinks.map((link) => (
                 <Link

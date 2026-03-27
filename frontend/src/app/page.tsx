@@ -15,6 +15,7 @@ import {
 import Link from "next/link";
 import type { Session } from "@supabase/supabase-js";
 import { signInWithGoogle } from "@/lib/supabase";
+import { haptic } from "@/lib/haptics";
 
 // ─── Topic Groups (organized into sections) ────────────────────────────────
 
@@ -36,84 +37,84 @@ const TOPIC_GROUPS: TopicGroup[] = [
     section: "Unit Economics & True Metrics",
     sectionColor: "emerald",
     topics: [
-      { label: "MER",                   query: "marketing efficiency ratio blended return all channels true performance",         icon: TrendingUp,     color: "emerald" },
-      { label: "nCAC / Blended CAC",    query: "new customer acquisition cost blended cac true cost payback per buyer",           icon: DollarSign,     color: "emerald" },
-      { label: "LTV:nCAC Ratio",        query: "lifetime value cac ratio ltv ncac profitable long-term customer acquisition",     icon: BarChart2,      color: "teal"    },
-      { label: "Net Profit",            query: "net profit bottom line profitability ebitda operating margin p&l",                icon: PieChart,       color: "green"   },
-      { label: "Contribution Margin",   query: "contribution margin unit economics cm1 cm2 prophit growth profitability",         icon: Activity,       color: "green"   },
-      { label: "Payback Period",        query: "payback period acquisition cost recover break even subscription upfront",         icon: Clock,          color: "teal"    },
-      { label: "Incrementality",        query: "incrementality lift test holdout attribution media mix model measurement",        icon: Layers,         color: "sky"     },
-      { label: "ROAS vs Real Metrics",  query: "roas vanity metric marketing efficiency true blended channel rethink reporting",  icon: AlertTriangle,  color: "amber"   },
-      { label: "Cash Conversion Cycle", query: "cash conversion cycle working capital supplier terms negative cash inventory",    icon: RefreshCw,      color: "teal"    },
-      { label: "Revenue Quality",       query: "quality of revenue hierarchy recurring subscription repeat consumable one-time",  icon: TrendingUp,     color: "green"   },
+      { label: "MER",                   query: "marketing efficiency ratio",                icon: TrendingUp,     color: "emerald" },
+      { label: "nCAC / Blended CAC",    query: "blended CAC acquisition cost",              icon: DollarSign,     color: "emerald" },
+      { label: "LTV:nCAC Ratio",        query: "LTV customer lifetime value acquisition",   icon: BarChart2,      color: "teal"    },
+      { label: "Net Profit",            query: "net profit profitability margin",            icon: PieChart,       color: "green"   },
+      { label: "Contribution Margin",   query: "contribution margin unit economics",         icon: Activity,       color: "green"   },
+      { label: "Payback Period",        query: "payback period acquisition recover",         icon: Clock,          color: "teal"    },
+      { label: "Incrementality",        query: "incrementality lift holdout test",           icon: Layers,         color: "sky"     },
+      { label: "ROAS vs Real Metrics",  query: "ROAS blended efficiency reporting",          icon: AlertTriangle,  color: "amber"   },
+      { label: "Cash Conversion Cycle", query: "cash conversion inventory working capital",  icon: RefreshCw,      color: "teal"    },
+      { label: "Revenue Quality",       query: "revenue quality recurring repeat",           icon: TrendingUp,     color: "green"   },
     ]
   },
   {
     section: "Email & SMS",
     sectionColor: "violet",
     topics: [
-      { label: "Email Marketing",       query: "email marketing campaign strategy dtc revenue roi channel",                      icon: Mail,           color: "violet"  },
-      { label: "Welcome Flow",          query: "welcome flow onboarding new subscriber first email lifestyle sequence structure", icon: MailOpen,       color: "violet"  },
-      { label: "Abandoned Cart",        query: "abandoned cart browse abandonment recovery email sequence",                      icon: ShoppingCart,   color: "violet"  },
-      { label: "Win-Back / Re-engage",  query: "winback win-back re-engage churned subscriber lapsed customer recovery",        icon: RefreshCw,      color: "blue"    },
-      { label: "Email Segmentation",    query: "segmentation engaged subscribers list hygiene behavioral signals vip",           icon: Users,          color: "blue"    },
-      { label: "Email Deliverability",  query: "deliverability open rate inbox placement sender reputation list health",         icon: Inbox,          color: "sky"     },
-      { label: "SMS Marketing",         query: "sms text message marketing vip access urgency postscript recart klaviyo",        icon: MessageSquare,  color: "indigo"  },
-      { label: "Klaviyo / ESP Setup",   query: "klaviyo email platform flow automation trigger lifecycle segmentation",          icon: Zap,            color: "indigo"  },
-      { label: "Send Cadence & Timing", query: "send frequency cadence timing over-messaging inbox fatigue list health volume",  icon: Clock,          color: "slate"   },
+      { label: "Email Marketing",       query: "email marketing revenue strategy",           icon: Mail,           color: "violet"  },
+      { label: "Welcome Flow",          query: "welcome flow onboarding sequence",           icon: MailOpen,       color: "violet"  },
+      { label: "Abandoned Cart",        query: "abandoned cart recovery email",              icon: ShoppingCart,   color: "violet"  },
+      { label: "Win-Back / Re-engage",  query: "winback re-engage lapsed customer",          icon: RefreshCw,      color: "blue"    },
+      { label: "Email Segmentation",    query: "email segmentation subscribers list",        icon: Users,          color: "blue"    },
+      { label: "Email Deliverability",  query: "deliverability open rate inbox",             icon: Inbox,          color: "sky"     },
+      { label: "SMS Marketing",         query: "SMS text marketing campaigns",               icon: MessageSquare,  color: "indigo"  },
+      { label: "Klaviyo / ESP Setup",   query: "Klaviyo email automation flows",             icon: Zap,            color: "indigo"  },
+      { label: "Send Cadence & Timing", query: "send frequency cadence timing",              icon: Clock,          color: "slate"   },
     ]
   },
   {
     section: "Retention & Subscription",
     sectionColor: "emerald",
     topics: [
-      { label: "Retention Strategy",   query: "retention strategy repeat purchase customer loyalty lifecycle every touchpoint",  icon: RefreshCw,      color: "emerald" },
-      { label: "Subscription Models",  query: "subscription recurring revenue model pricing hierarchy cancel flow churn",        icon: CreditCard,     color: "emerald" },
-      { label: "Churn Prevention",     query: "churn prevention cancel save flow predictive winback before customers leave",    icon: TrendingDown,   color: "rose"    },
-      { label: "Post-Purchase Upsell", query: "post purchase upsell cross sell order bump thank you page aftersell rebuy",      icon: ShoppingCart,   color: "teal"    },
-      { label: "LTV & CLV",           query: "ltv clv customer lifetime value cohort repurchase rate first order profitability", icon: TrendingUp,     color: "emerald" },
-      { label: "Subscription Pricing", query: "subscription pricing quarterly 90-day upfront unit economics payback aggressive", icon: DollarSign,    color: "teal"    },
-      { label: "VIP & Loyalty",        query: "vip loyalty high value behavior create experiences repeat customer rewards",      icon: Star,           color: "amber"   },
+      { label: "Retention Strategy",   query: "retention repeat purchase loyalty",           icon: RefreshCw,      color: "emerald" },
+      { label: "Subscription Models",  query: "subscription recurring revenue model",        icon: CreditCard,     color: "emerald" },
+      { label: "Churn Prevention",     query: "churn cancel save prevention",                icon: TrendingDown,   color: "rose"    },
+      { label: "Post-Purchase Upsell", query: "post purchase upsell cross sell",             icon: ShoppingCart,   color: "teal"    },
+      { label: "LTV & CLV",           query: "lifetime value cohort repurchase",             icon: TrendingUp,     color: "emerald" },
+      { label: "Subscription Pricing", query: "subscription pricing quarterly upfront",      icon: DollarSign,     color: "teal"    },
+      { label: "VIP & Loyalty",        query: "VIP loyalty high value customer",             icon: Star,           color: "amber"   },
     ]
   },
   {
     section: "Paid Acquisition",
     sectionColor: "blue",
     topics: [
-      { label: "Paid Social / Meta",   query: "paid social meta facebook ads scaling ad account cpm cpa budget",               icon: BarChart2,      color: "blue"    },
-      { label: "Creative Testing",     query: "creative testing marpipe hooks thumb stop rate ad fatigue performance brief",    icon: Lightbulb,      color: "indigo"  },
-      { label: "Video Ads & UGC",      query: "video ads ugc motion hook scroll-stopping content production creator",           icon: Play,           color: "violet"  },
-      { label: "CTV / Connected TV",   query: "connected tv roku streaming ads ctv advertorial format test",                   icon: Monitor,        color: "sky"     },
-      { label: "Attribution Setup",    query: "attribution setup northbeam triple whale reporting pixel multi-touch",           icon: Target,         color: "rose"    },
-      { label: "Media Mix / MMM",      query: "media mix model mmm channel allocation budget efficiency holdout test",         icon: PieChart,       color: "amber"   },
+      { label: "Paid Social / Meta",   query: "paid social Meta Facebook ads",              icon: BarChart2,      color: "blue"    },
+      { label: "Creative Testing",     query: "creative testing hooks ad performance",       icon: Lightbulb,      color: "indigo"  },
+      { label: "Video Ads & UGC",      query: "video ads UGC content creator",              icon: Play,           color: "violet"  },
+      { label: "CTV / Connected TV",   query: "connected TV streaming ads CTV",             icon: Monitor,        color: "sky"     },
+      { label: "Attribution Setup",    query: "attribution reporting Northbeam Triple Whale", icon: Target,        color: "rose"    },
+      { label: "Media Mix / MMM",      query: "media mix model channel allocation",         icon: PieChart,       color: "amber"   },
     ]
   },
   {
     section: "Growth & Brand",
     sectionColor: "amber",
     topics: [
-      { label: "Product Launch",       query: "product launch new product checklist pre-launch sequence strategy go-to-market", icon: Package,        color: "amber"   },
-      { label: "Giveaways",            query: "giveaway contest mechanics brand partnership collaboration explicit entry",       icon: Gift,           color: "rose"    },
-      { label: "Brand Collaborations", query: "brand collaboration partnership limited edition collab co-brand",                icon: Building2,      color: "rose"    },
-      { label: "AOV & Bundle Strategy",query: "average order value bundle upsell cross sell cogs arbitrage offer structure",   icon: LayoutGrid,     color: "teal"    },
-      { label: "Pricing & Offers",     query: "pricing offer discount urgency promotion conversion first purchase incentive",   icon: DollarSign,     color: "amber"   },
-      { label: "Influencer / Creator", query: "influencer creator ugc affiliate ambassador seeding campaign",                  icon: Megaphone,      color: "rose"    },
-      { label: "IRL Events & Content", query: "irl events pop-up experiential content engine brand moment community",          icon: Star,           color: "yellow"  },
-      { label: "D2C vs Wholesale",     query: "wholesale retail amazon channel mix d2c versus retail strategy",                icon: ShoppingCart,   color: "slate"   },
+      { label: "Product Launch",       query: "product launch checklist strategy",          icon: Package,        color: "amber"   },
+      { label: "Giveaways",            query: "giveaway contest brand",                     icon: Gift,           color: "rose"    },
+      { label: "Brand Collaborations", query: "brand collaboration partnership collab",     icon: Building2,      color: "rose"    },
+      { label: "AOV & Bundle Strategy",query: "average order value bundle upsell",          icon: LayoutGrid,     color: "teal"    },
+      { label: "Pricing & Offers",     query: "pricing discount offer conversion",          icon: DollarSign,     color: "amber"   },
+      { label: "Influencer / Creator", query: "influencer creator affiliate campaign",      icon: Megaphone,      color: "rose"    },
+      { label: "IRL Events & Content", query: "events pop-up experiential content",         icon: Star,           color: "yellow"  },
+      { label: "D2C vs Wholesale",     query: "wholesale retail Amazon channel DTC",        icon: ShoppingCart,   color: "slate"   },
     ]
   },
   {
     section: "Operations & Finance",
     sectionColor: "slate",
     topics: [
-      { label: "Cash Flow & Inventory", query: "cash flow inventory working capital trapped capital supplier payment terms",     icon: TrendingUp,     color: "green"   },
-      { label: "Forecasting & P&L",    query: "forecast forecasting daily metric targeting planning predictable growth p&l",    icon: FileText,       color: "slate"   },
-      { label: "Revenue Milestones",   query: "revenue milestone scale 1M 5M 10M 7-figure 8-figure growth stage",              icon: BarChart2,      color: "indigo"  },
-      { label: "Lender / Debt / Covenants", query: "lender covenant debt loan credit line cash risk borrowing",                icon: AlertTriangle,  color: "amber"   },
-      { label: "Shopify & Tech Stack", query: "shopify tech stack app integration platform tools netsuite",                    icon: Wrench,         color: "slate"   },
-      { label: "AI Tools for ECOM",    query: "ai automation tools efficiency creative generation workflow operator",           icon: Sparkles,       color: "fuchsia" },
-      { label: "Agency Operations",    query: "agency media buying team structure operator accountability single model",        icon: Users,          color: "slate"   },
-      { label: "DTC Analytics",        query: "analytics reporting dashboard statlas data integration insights platform",       icon: Activity,       color: "sky"     },
+      { label: "Cash Flow & Inventory", query: "cash flow inventory working capital",       icon: TrendingUp,     color: "green"   },
+      { label: "Forecasting & P&L",    query: "forecast planning growth P&L",               icon: FileText,       color: "slate"   },
+      { label: "Revenue Milestones",   query: "revenue scale million growth stage",         icon: BarChart2,      color: "indigo"  },
+      { label: "Lender / Debt",        query: "debt loan credit line borrowing",            icon: AlertTriangle,  color: "amber"   },
+      { label: "Shopify & Tech Stack", query: "Shopify tech stack tools integration",       icon: Wrench,         color: "slate"   },
+      { label: "AI Tools for ECOM",    query: "AI automation tools efficiency",             icon: Sparkles,       color: "fuchsia" },
+      { label: "Agency Operations",    query: "agency team structure media buying",         icon: Users,          color: "slate"   },
+      { label: "DTC Analytics",        query: "analytics dashboard reporting data",         icon: Activity,       color: "sky"     },
     ]
   },
 ];
@@ -374,6 +375,7 @@ export default function HomePage() {
   };
 
   const handleTopic = (topic: Topic) => {
+    haptic("selection");
     const next = activeTopic === topic.label ? "" : topic.label;
     setActiveTopic(next);
     setTypeFilter("");
@@ -382,18 +384,21 @@ export default function HomePage() {
   };
 
   const handleType = (type: string) => {
+    haptic("selection");
     setTypeFilter(type);
     setActiveTopic("");
     doSearch(query || "", source, type, session?.access_token);
   };
 
   const handleSource = (src: string) => {
+    haptic("selection");
     setSource(src);
     const activeTopicQuery = ALL_TOPICS.find(t => t.label === activeTopic)?.query;
     doSearch(query || activeTopicQuery || "", src, typeFilter, session?.access_token);
   };
 
   const clearAll = () => {
+    haptic("impact");
     setQuery(""); setSource(""); setTypeFilter(""); setActiveTopic("");
     doSearch("", "", "", session?.access_token);
   };
@@ -428,7 +433,7 @@ export default function HomePage() {
                   <button
                     key={topic.label}
                     onClick={() => handleTopic(topic)}
-                    className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all text-left ${
+                    className={`btn-base w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-left ${
                       active ? `${c.pill} border` : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"
                     }`}
                   >
@@ -453,7 +458,7 @@ export default function HomePage() {
                 <button
                   key={value}
                   onClick={() => handleType(value)}
-                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all text-left ${
+                  className={`btn-base w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs font-medium text-left ${
                     active ? `${c.pill} border` : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"
                   }`}
                 >
@@ -480,7 +485,7 @@ export default function HomePage() {
                 <button
                   key={value}
                   onClick={() => handleSource(value)}
-                  className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-all text-left ${
+                  className={`btn-base w-full flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-left ${
                     active
                       ? "bg-indigo-600/20 text-indigo-300 border border-indigo-500/40 font-medium"
                       : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"
@@ -655,12 +660,14 @@ export default function HomePage() {
         ) : (
           <>
             {spotlight && hasFilters && (
-              <SpotlightCard
-                insight={spotlight}
-                label={activeTopic || CONTENT_TYPES.find(t => t.value === typeFilter)?.label || "Top Result"}
-              />
+              <div className="animate-scale-in">
+                <SpotlightCard
+                  insight={spotlight}
+                  label={activeTopic || CONTENT_TYPES.find(t => t.value === typeFilter)?.label || "Top Result"}
+                />
+              </div>
             )}
-            <div className="space-y-1">
+            <div className="space-y-1 stagger">
               {(hasFilters ? listResults : results).map((insight, i) => (
                 <InsightRow key={insight.id || i} insight={insight} />
               ))}
