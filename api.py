@@ -727,7 +727,7 @@ def _search_postgres(
         conn = psycopg2.connect(db_url, connect_timeout=10)
         cur = conn.cursor()
         try:
-            where_clauses = ["fts @@ plainto_tsquery('english', %s)"]
+            where_clauses = ["fts @@ websearch_to_tsquery('english', %s)"]
             params: list = [q.strip()]
             if podcast:
                 where_clauses.append("podcast = %s")
@@ -742,9 +742,9 @@ def _search_postgres(
             cur.execute(
                 f"""
                 SELECT id, video_id, podcast, category, title, description, start_time_sec, end_time_sec,
-                       ts_rank(fts, plainto_tsquery('english', %s)) AS rank,
+                       ts_rank(fts, websearch_to_tsquery('english', %s)) AS rank,
                        title AS headline_title,
-                       ts_headline('english', description, plainto_tsquery('english', %s),
+                       ts_headline('english', description, websearch_to_tsquery('english', %s),
                            'MaxFragments=1,MaxWords=20,MinWords=5') AS headline_description
                 FROM insights
                 WHERE {" AND ".join(where_clauses)}
@@ -775,7 +775,7 @@ def _search_postgres(
         conn = psycopg2.connect(db_url, connect_timeout=10)
         cur = conn.cursor()
         try:
-            seg_where = ["fts @@ plainto_tsquery('english', %s)"]
+            seg_where = ["fts @@ websearch_to_tsquery('english', %s)"]
             seg_params: list = [q.strip()]
             if podcast:
                 seg_where.append("podcast = %s")
@@ -787,8 +787,8 @@ def _search_postgres(
             cur.execute(
                 f"""
                 SELECT id, video_id, podcast, start_time_sec, end_time_sec, text, speaker_label,
-                       ts_rank(fts, plainto_tsquery('english', %s)) AS rank,
-                       ts_headline('english', text, plainto_tsquery('english', %s),
+                       ts_rank(fts, websearch_to_tsquery('english', %s)) AS rank,
+                       ts_headline('english', text, websearch_to_tsquery('english', %s),
                            'MaxFragments=1,MaxWords=25,MinWords=10') AS headline
                 FROM segments
                 WHERE {" AND ".join(seg_where)}
@@ -867,7 +867,7 @@ def _search_postgres(
         cur = conn.cursor()
         try:
             q_clean = q.strip()
-            nl_where = ["to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')) @@ plainto_tsquery('english', %s)"]
+            nl_where = ["to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')) @@ websearch_to_tsquery('english', %s)"]
             nl_params: list = [q_clean, q_clean]  # first for WHERE tsquery, second for ts_rank
             if category:
                 nl_where.append("ni.category ILIKE %s")
@@ -877,7 +877,7 @@ def _search_postgres(
                 f"""
                 SELECT ni.id, ni.source, ni.category, ni.title, ni.description,
                        n.subject, n.author, n.published_at,
-                       ts_rank(to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')), plainto_tsquery('english', %s)) AS rank
+                       ts_rank(to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')), websearch_to_tsquery('english', %s)) AS rank
                 FROM newsletter_insights ni
                 JOIN newsletters n ON n.id = ni.newsletter_id
                 WHERE {" AND ".join(nl_where)}
@@ -2629,7 +2629,7 @@ def list_newsletter_insights(
             where = []
             params: list = []
             if q:
-                where.append("to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')) @@ plainto_tsquery('english', %s)")
+                where.append("to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')) @@ websearch_to_tsquery('english', %s)")
                 params.append(q)
             if source:
                 where.append("ni.source = %s")
