@@ -86,8 +86,9 @@ def chunk_text(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = OVERLAP) 
     return chunks
 
 
-def extract_from_chunk(chunk: str, episode_title: str, podcast: str) -> list[dict]:
-    """Send one chunk to LLM and get insights back."""
+def extract_from_chunk(chunk: str, episode_title: str, podcast: str, retries: int = 3) -> list[dict]:
+    """Send one chunk to LLM and get insights back. Retries on empty/error."""
+    import time as _time
     prompt_tpl = _load_prompt("extract_insights_system", "operators")
     if not prompt_tpl:
         return []
@@ -97,10 +98,16 @@ def extract_from_chunk(chunk: str, episode_title: str, podcast: str) -> list[dic
     user = prompt_tpl.replace("{transcript}", enriched)
     system = "You are an expert eCommerce and DTC podcast analyst. Follow the instructions exactly. Be thorough — extract 5-15 insights per chunk."
 
-    raw = _anthropic_message(system, user)
-    if not raw:
-        return []
-    return parse_extract_insights_output(raw)
+    for attempt in range(retries):
+        try:
+            raw = _anthropic_message(system, user)
+            if raw:
+                return parse_extract_insights_output(raw)
+        except Exception as e:
+            print(f" [retry {attempt+1}/{retries}: {e}]", end="", flush=True)
+        if attempt < retries - 1:
+            _time.sleep(5 * (attempt + 1))
+    return []
 
 
 def store_insights(db_url: str, video_id: str, podcast: str, insights: list[dict]) -> int:

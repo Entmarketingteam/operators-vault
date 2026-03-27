@@ -44,19 +44,22 @@ def log(msg: str):
 
 
 def get_zero_insight_episodes() -> list[tuple[str, str, str, int]]:
-    """Returns list of (video_id, title, podcast, seg_count) ordered by seg_count desc."""
+    """Returns list of (video_id, title, podcast, 0) for episodes with no insights."""
     conn = psycopg2.connect(DATABASE_URL)
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT v.video_id, v.title, v.podcast, COUNT(DISTINCT s.id) as seg_count
+                SELECT v.video_id, v.title, v.podcast, 0
                 FROM videos v
-                LEFT JOIN transcriptions t ON t.video_id = v.video_id
-                LEFT JOIN segments s ON s.transcription_id = t.id
-                LEFT JOIN insights i ON i.video_id = v.video_id
-                GROUP BY v.video_id, v.title, v.podcast
-                HAVING COUNT(DISTINCT i.id) = 0 AND COUNT(DISTINCT s.id) > 0
-                ORDER BY seg_count DESC
+                WHERE EXISTS (
+                    SELECT 1 FROM transcriptions t
+                    JOIN segments s ON s.transcription_id = t.id
+                    WHERE t.video_id = v.video_id
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM insights i WHERE i.video_id = v.video_id
+                )
+                ORDER BY v.video_id
             """)
             return cur.fetchall()
     finally:
@@ -90,34 +93,44 @@ def main():
         global_idx = i + args.start + 1
         progress = f"[{global_idx}/{total_available}]"
 
-        log(f"{progress} {video_id} | {podcast} | segs:{seg_count} | {title[:55]}")
+        log(f"{progress} {video_id} | {podcast} | {title[:55]}")
 
-        result = subprocess.run(
+        # Run with tee to both capture and stream to log
+        import io
+        output_lines: list[str] = []
+
+        with subprocess.Popen(
             [sys.executable, str(SCRIPT), video_id],
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
             cwd=str(PROJECT_DIR),
-        )
+            bufsize=1,
+        ) as proc:
+            for line in proc.stdout:  # type: ignore
+                line = line.rstrip()
+                output_lines.append(line)
+                if line.strip():
+                    log(f"  {line}")
+            proc.wait()
+            returncode = proc.returncode
 
-        output = result.stdout + result.stderr
         # Extract stored count from output
         stored = 0
-        for line in output.splitlines():
+        for line in output_lines:
             if "Stored:" in line and "insights" in line:
                 try:
                     stored = int(line.split("Stored:")[1].split("new")[0].strip())
                 except Exception:
                     pass
-            if line.strip():
-                log(f"  {line.rstrip()}")
 
-        if result.returncode == 0:
+        if returncode == 0:
             success += 1
             total_stored += stored
             log(f"  => OK: {stored} insights stored")
         else:
             failed += 1
-            log(f"  => FAILED (exit {result.returncode})")
+            log(f"  => FAILED (exit {returncode})")
 
         # Small delay to avoid rate limiting
         time.sleep(3)
