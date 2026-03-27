@@ -877,7 +877,8 @@ def _search_postgres(
                 f"""
                 SELECT ni.id, ni.source, ni.category, ni.title, ni.description,
                        n.subject, n.author, n.published_at,
-                       ts_rank(to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')), websearch_to_tsquery('english', %s)) AS rank
+                       ts_rank(to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')), websearch_to_tsquery('english', %s)) AS rank,
+                       ni.newsletter_id::text
                 FROM newsletter_insights ni
                 JOIN newsletters n ON n.id = ni.newsletter_id
                 WHERE {" AND ".join(nl_where)}
@@ -900,6 +901,7 @@ def _search_postgres(
                     "rank": float(row[8]) if row[8] is not None else 0,
                     "headline_title": row[3],
                     "headline_description": row[4],
+                    "newsletter_id": row[9],
                 })
         finally:
             cur.close()
@@ -1576,7 +1578,9 @@ def _get_speaker_by_slug(slug: str) -> dict:
             "is_host": bool(row[13]) if has_host_cols else False,
             "host_podcast": row[14] if has_host_cols else None,
         }
-        # Join with insights via people table (match on name/slug)
+        speaker_name = row[2]  # e.g. "Roman Khan"
+
+        # Primary: explicit insight_people join
         cur.execute(
             """
             SELECT i.id, i.video_id, i.podcast, i.category, i.title, i.description, i.start_time_sec
@@ -1585,9 +1589,9 @@ def _get_speaker_by_slug(slug: str) -> dict:
             JOIN people p ON p.id = ip.person_id
             WHERE (p.slug = %s OR LOWER(p.name) = LOWER(%s))
             ORDER BY i.created_at DESC
-            LIMIT 20
+            LIMIT 30
             """,
-            (slug, row[2]),
+            (slug, speaker_name),
         )
         insights = [
             {
@@ -1601,7 +1605,67 @@ def _get_speaker_by_slug(slug: str) -> dict:
             }
             for r in cur.fetchall()
         ]
+
+        # Fallback: FTS search for the speaker's name in insight title/description
+        # Handles cases where insight_people wasn't populated (most batch-extracted insights)
+        if not insights:
+            # Also search segments (podcast transcripts) for the speaker name
+            name_query = speaker_name.replace(" ", " & ")  # "Roman & Khan"
+            cur.execute(
+                """
+                SELECT DISTINCT ON (i.id) i.id, i.video_id, i.podcast, i.category, i.title, i.description, i.start_time_sec
+                FROM insights i
+                WHERE fts @@ to_tsquery('english', %s)
+                ORDER BY i.id, i.created_at DESC
+                LIMIT 30
+                """,
+                (name_query,),
+            )
+            insights = [
+                {
+                    "id": str(r[0]),
+                    "video_id": r[1],
+                    "podcast": r[2],
+                    "category": r[3],
+                    "title": r[4],
+                    "description": r[5],
+                    "start_time_sec": float(r[6]) if r[6] is not None else None,
+                    "via_mention": True,
+                }
+                for r in cur.fetchall()
+            ]
+
+            # If still none, try searching the segments table for transcript mentions
+            # and surface the insights from those episodes
+            if not insights:
+                cur.execute(
+                    """
+                    SELECT DISTINCT i.id, i.video_id, i.podcast, i.category, i.title, i.description, i.start_time_sec
+                    FROM segments s
+                    JOIN transcriptions t ON t.id = s.transcription_id
+                    JOIN insights i ON i.video_id = t.video_id
+                    WHERE s.fts @@ to_tsquery('english', %s)
+                    ORDER BY i.id
+                    LIMIT 30
+                    """,
+                    (name_query,),
+                )
+                insights = [
+                    {
+                        "id": str(r[0]),
+                        "video_id": r[1],
+                        "podcast": r[2],
+                        "category": r[3],
+                        "title": r[4],
+                        "description": r[5],
+                        "start_time_sec": float(r[6]) if r[6] is not None else None,
+                        "via_mention": True,
+                    }
+                    for r in cur.fetchall()
+                ]
+
         speaker["insights"] = insights
+        speaker["insights_via_mention"] = any(i.get("via_mention") for i in insights)
         return speaker
     finally:
         cur.close()
@@ -2635,6 +2699,61 @@ def list_newsletters(
         finally:
             cur.close()
             conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/newsletters/{newsletter_id}")
+def get_newsletter(newsletter_id: str):
+    """Get a single newsletter with its full body text and all extracted insights."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    try:
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT id, email_id, source, author, subject, published_at, processed, body_text
+                FROM newsletters WHERE id = %s
+                """,
+                (newsletter_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Newsletter not found")
+            newsletter = {
+                "id": str(row[0]),
+                "email_id": row[1],
+                "source": row[2],
+                "author": row[3],
+                "subject": row[4],
+                "published_at": row[5].isoformat() if row[5] else None,
+                "processed": row[6],
+                "body_text": row[7] or "",
+            }
+            # All insights from this newsletter
+            cur.execute(
+                """
+                SELECT id, category, title, description
+                FROM newsletter_insights
+                WHERE newsletter_id = %s
+                ORDER BY category, title
+                """,
+                (newsletter_id,),
+            )
+            newsletter["insights"] = [
+                {"id": str(r[0]), "category": r[1], "title": r[2], "description": r[3]}
+                for r in cur.fetchall()
+            ]
+            return newsletter
+        finally:
+            cur.close()
+            conn.close()
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
