@@ -375,6 +375,18 @@ def _do_sync(job_id: str | None = None) -> dict:
             errors.append(err_msg)
     if errors:
         _log.warning("%d videos failed to process. First error: %s", len(errors), errors[0])
+
+    # Extract insights for any newly processed videos
+    if processed:
+        _log.info("Sync: extracting insights for %d newly processed videos", len(processed))
+        if job_id:
+            _update_job_heartbeat(job_id, progress=f"extracting insights for {len(processed)} new videos")
+        try:
+            insight_result = _do_extract_insights_from_transcripts(job_id=job_id, limit=len(processed) + 10)
+            _log.info("Sync insight extraction: %s", insight_result)
+        except Exception as e:
+            _log.warning("Sync: insight extraction failed (non-fatal): %s", e)
+
     _log.info("Sync complete: upserted=%d processed=%d errors=%d", upserted, len(processed), len(errors))
     return {"ok": True, "upserted": upserted, "processed": len(processed), "video_ids": processed, "errors": errors[:5]}
 

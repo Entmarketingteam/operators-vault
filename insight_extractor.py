@@ -61,18 +61,6 @@ def _anthropic_message(system: str, user: str, model: str = "claude-haiku-4-5-20
     return ""
 
 
-# --- Category names as in prompts and DB ---
-CATEGORIES = [
-    "Frameworks and exercises",
-    "Points of view and perspectives",
-    "Business ideas",
-    "Stories and anecdotes",
-    "Quotes",
-    "Products",
-    "Creator and Influencer Tactics",
-]
-
-
 def _parse_insight_block(block: str, category: str) -> list[dict[str, str]]:
     """Parse a category block: * [Title]: [Desc] or * "[Quote]" – [Person]."""
     out: list[dict[str, str]] = []
