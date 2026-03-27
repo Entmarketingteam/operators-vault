@@ -125,13 +125,14 @@ const ALL_TOPICS = TOPIC_GROUPS.flatMap(g => g.topics);
 // ─── Content Type Filters ─────────────────────────────────────────────────
 
 const CONTENT_TYPES = [
-  { label: "All Content",      value: "",                          icon: Layers,      color: "slate"   },
-  { label: "Frameworks",       value: "Frameworks and exercises",  icon: Lightbulb,   color: "amber"   },
-  { label: "Tactical Recs",    value: "Tactical recommendations",  icon: Target,      color: "indigo"  },
-  { label: "Points of View",   value: "Points of view",            icon: MessageSquare,color: "rose"   },
-  { label: "Quotes",           value: "Quotes",                    icon: Quote,       color: "violet"  },
-  { label: "Stories",          value: "Stories and case studies",  icon: BookMarked,  color: "emerald" },
-  { label: "Tools & Products", value: "Tools and products",        icon: Wrench,      color: "sky"     },
+  { label: "All Content",      value: "",                              icon: Layers,        color: "slate"   },
+  { label: "Frameworks",       value: "Frameworks and exercises",      icon: Lightbulb,     color: "amber"   },
+  { label: "Points of View",   value: "Points of view",                icon: MessageSquare, color: "rose"    },
+  { label: "Quotes",           value: "Quotes",                        icon: Quote,         color: "violet"  },
+  { label: "Stories",          value: "Stories and anecdotes",         icon: BookMarked,    color: "emerald" },
+  { label: "Business Ideas",   value: "Business ideas",                icon: Zap,           color: "indigo"  },
+  { label: "Products",         value: "Products",                      icon: Package,       color: "sky"     },
+  { label: "Creator Tactics",  value: "Creator and Influencer Tactics",icon: Megaphone,     color: "teal"    },
 ];
 
 const SOURCE_FILTERS = [
@@ -175,7 +176,9 @@ function getCategoryColor(category?: string): string {
   if (c.includes("tactical")) return "indigo";
   if (c.includes("pov") || c.includes("perspective") || c.includes("point")) return "rose";
   if (c.includes("quote")) return "violet";
-  if (c.includes("story") || c.includes("case")) return "emerald";
+  if (c.includes("stor") || c.includes("anecdote") || c.includes("case")) return "emerald";
+  if (c.includes("business idea")) return "indigo";
+  if (c.includes("creator") || c.includes("influencer")) return "teal";
   if (c.includes("tool") || c.includes("product")) return "sky";
   return "slate";
 }
