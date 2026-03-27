@@ -1778,9 +1778,35 @@ def chat(
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
 
+    # Extract keywords from conversational questions before FTS search.
+    # plainto/websearch_to_tsquery require ALL terms to match; a conversational
+    # question like "How do 8-figure brands approach BFCM prep?" returns 0 hits
+    # because stop words + rare terms dilute the AND-query. We strip noise words
+    # and try the full question first, then fall back to keyword-only query.
+    _STOP = frozenset(["how", "do", "does", "what", "why", "when", "where", "who",
+                       "can", "should", "would", "could", "are", "is", "the", "a",
+                       "an", "to", "for", "of", "in", "on", "at", "about", "with",
+                       "and", "or", "but", "not", "if", "then", "i", "we", "you",
+                       "they", "my", "your", "their", "say", "says", "approach",
+                       "tell", "think", "use", "some", "most", "more", "best",
+                       "good", "get", "into", "from", "by"])
+
+    def _extract_keywords(q: str) -> str:
+        import re as _re
+        words = _re.sub(r"[^\w\s\-]", " ", q.lower()).split()
+        kw = [w for w in words if w not in _STOP and len(w) > 2]
+        return " ".join(kw[:6])  # max 6 keywords
+
     # Search both podcast insights and newsletter insights
     search_result = _search_postgres(msg, limit=body.context_limit, type_="all")
     hits = search_result.get("hits") or []
+
+    # If no hits with full question, retry with extracted keywords only
+    if not hits:
+        kw_query = _extract_keywords(msg)
+        if kw_query and kw_query != msg.lower():
+            search_result = _search_postgres(kw_query, limit=body.context_limit, type_="all")
+            hits = search_result.get("hits") or []
 
     # Enrich podcast insights with speaker names via people join
     try:
