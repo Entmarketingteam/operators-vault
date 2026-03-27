@@ -1770,6 +1770,30 @@ def chat(
     search_result = _search_postgres(msg, limit=body.context_limit, type_="all")
     hits = search_result.get("hits") or []
 
+    # Enrich podcast insights with speaker names via people join
+    try:
+        conn = psycopg2.connect(db_url, connect_timeout=10)
+        cur = conn.cursor()
+        insight_ids = [h["id"] for h in hits if h.get("type") != "newsletter_insight" and h.get("id")]
+        if insight_ids:
+            cur.execute(
+                """
+                SELECT ip.insight_id::text, STRING_AGG(p.name, ', ') as speakers
+                FROM insight_people ip JOIN people p ON p.id = ip.person_id
+                WHERE ip.insight_id::text = ANY(%s)
+                GROUP BY ip.insight_id
+                """,
+                (insight_ids,),
+            )
+            speaker_map = {row[0]: row[1] for row in cur.fetchall()}
+            for h in hits:
+                if h.get("id") in speaker_map:
+                    h["speaker_name"] = speaker_map[h["id"]]
+        cur.close()
+        conn.close()
+    except Exception:
+        pass
+
     # Sort by rank descending, take top N
     hits = sorted(hits, key=lambda h: float(h.get("rank") or 0), reverse=True)[: body.context_limit]
 
