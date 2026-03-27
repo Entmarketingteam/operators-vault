@@ -1793,18 +1793,22 @@ def chat(
 
     def _extract_keywords(q: str) -> str:
         import re as _re
-        words = _re.sub(r"[^\w\s\-]", " ", q.lower()).split()
-        kw = [w for w in words if w not in _STOP and len(w) > 2]
-        return " ".join(kw[:6])  # max 6 keywords
+        # Strip punctuation (keep letters/digits/spaces), lowercase, split
+        words = _re.sub(r"[^\w\s]", " ", q.lower()).split()
+        # Remove stop words, short words, and tokens containing digits (e.g. "8")
+        kw = [w for w in words if w not in _STOP and len(w) > 2 and not any(c.isdigit() for c in w)]
+        return " OR ".join(kw[:6])  # OR-joined for maximum recall in fallback
 
     # Search both podcast insights and newsletter insights
     search_result = _search_postgres(msg, limit=body.context_limit, type_="all")
     hits = search_result.get("hits") or []
 
-    # If no hits with full question, retry with extracted keywords only
+    # If no hits with full question, retry with OR-joined extracted keywords
+    # This handles conversational phrasing and acronyms like BFCM that need
+    # broader matching rather than strict AND across all terms.
     if not hits:
         kw_query = _extract_keywords(msg)
-        if kw_query and kw_query != msg.lower():
+        if kw_query and kw_query.replace(" OR ", " ").strip() != msg.lower().strip():
             search_result = _search_postgres(kw_query, limit=body.context_limit, type_="all")
             hits = search_result.get("hits") or []
 
