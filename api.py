@@ -2791,7 +2791,7 @@ def list_newsletter_insights(
             cur.execute(
                 f"""
                 SELECT ni.id, ni.source, ni.category, ni.title, ni.description,
-                       n.subject, n.author, n.published_at
+                       n.subject, n.author, n.published_at, ni.newsletter_id::text
                 FROM newsletter_insights ni
                 JOIN newsletters n ON n.id = ni.newsletter_id
                 {where_sql}
