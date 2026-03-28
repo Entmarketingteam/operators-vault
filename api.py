@@ -1700,35 +1700,40 @@ def _get_speaker_by_slug(slug: str) -> dict:
                 ][:30]
 
             # Tier 4: Search newsletter_insights for mentions of the speaker's name
-            cur.execute(
-                """
-                SELECT DISTINCT ni.id, ni.newsletter_id, ni.source, ni.category, ni.title, ni.description,
-                       n.subject, n.author, n.published_at
-                FROM newsletter_insights ni
-                JOIN newsletters n ON n.id = ni.newsletter_id
-                WHERE ni.fts @@ to_tsquery('english', %s)
-                ORDER BY ni.id
-                LIMIT 50
-                """,
-                (name_query,),
-            )
-            newsletter_insights = [
-                {
-                    "id": "ni_" + str(r[0]),
-                    "newsletter_id": str(r[1]),
-                    "source": r[2],
-                    "category": r[3],
-                    "title": r[4],
-                    "description": r[5],
-                    "subject": r[6],
-                    "author": r[7],
-                    "published_at": r[8].isoformat() if r[8] else None,
-                    "via_mention": True,
-                    "type": "newsletter",
-                }
-                for r in cur.fetchall()
-                if not _is_noisy_via_mention(r[4], speaker_first, speaker_last)
-            ][:30]
+            newsletter_insights = []
+            try:
+                cur.execute(
+                    """
+                    SELECT ni.id, ni.newsletter_id, ni.source, ni.category, ni.title, ni.description,
+                           n.subject, n.author, n.published_at
+                    FROM newsletter_insights ni
+                    JOIN newsletters n ON n.id = ni.newsletter_id
+                    WHERE ni.fts @@ to_tsquery('english', %s)
+                    ORDER BY ni.id
+                    LIMIT 50
+                    """,
+                    (name_query,),
+                )
+                newsletter_insights = [
+                    {
+                        "id": "ni_" + str(r[0]),
+                        "newsletter_id": str(r[1]),
+                        "source": r[2],
+                        "category": r[3],
+                        "title": r[4],
+                        "description": r[5],
+                        "subject": r[6],
+                        "author": r[7],
+                        "published_at": r[8].isoformat() if r[8] else None,
+                        "via_mention": True,
+                        "type": "newsletter",
+                    }
+                    for r in cur.fetchall()
+                    if not _is_noisy_via_mention(r[4], speaker_first, speaker_last)
+                ][:30]
+            except Exception:
+                # newsletter_insights table or fts column may not exist — skip gracefully
+                conn.rollback()
 
             # Merge and deduplicate by id
             seen_ids = {i["id"] for i in insights}
