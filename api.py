@@ -1629,8 +1629,8 @@ def _get_speaker_by_slug(slug: str) -> dict:
                 # Exclude titles that start with "Host " (host intro labels like "Host (introducing Roman Khan)")
                 if t_lower.startswith("host ") or t_lower.startswith("host("):
                     return True
-                # Exclude titles that look like "Person Name (via ...)" where the speaker name
-                # doesn't appear in the part before the parenthesis
+                # Exclude titles that look like "Person Name (to/via/re: SpeakerName)" where
+                # the speaker name doesn't appear in the part before the parenthesis
                 if "(" in t:
                     before_paren = t[:t.index("(")].strip().lower()
                     # If the part before the paren has words (looks like a name) and
@@ -1640,7 +1640,7 @@ def _get_speaker_by_slug(slug: str) -> dict:
                         if spk_first not in before_paren and spk_last not in before_paren:
                             # Additional guard: the part after ( should contain attribution language
                             after_paren = t_lower[t_lower.index("("):]
-                            if any(kw in after_paren for kw in ("via ", "as cited", "quoting", "per ", "citing")):
+                            if any(kw in after_paren for kw in ("via ", "as cited", "quoting", "per ", "citing", " to ", "re: ")):
                                 return True
                 return False
 
