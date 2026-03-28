@@ -1640,7 +1640,7 @@ def _get_speaker_by_slug(slug: str) -> dict:
                         if spk_first not in before_paren and spk_last not in before_paren:
                             # Additional guard: the part after ( should contain attribution language
                             after_paren = t_lower[t_lower.index("("):]
-                            if any(kw in after_paren for kw in ("via ", "as cited", "quoting", "per ", "citing", " to ", "re: ")):
+                            if any(kw in after_paren for kw in ("via ", "as cited", "quoting", "per ", "citing", " to ", "re: ", "(to ", "(re ")):
                                 return True
                 return False
 
