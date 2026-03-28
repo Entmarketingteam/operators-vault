@@ -1611,13 +1611,46 @@ def _get_speaker_by_slug(slug: str) -> dict:
         if not insights:
             # Also search segments (podcast transcripts) for the speaker name
             name_query = speaker_name.replace(" ", " & ")  # "Roman & Khan"
+            # Derive first/last name for noise filtering
+            name_parts = speaker_name.strip().split()
+            speaker_first = name_parts[0].lower() if name_parts else ""
+            speaker_last = name_parts[-1].lower() if len(name_parts) > 1 else ""
+
+            def _is_noisy_via_mention(title: str, spk_first: str, spk_last: str) -> bool:
+                """Return True if this insight title is a noisy attribution, not a real insight BY the speaker."""
+                t = title or ""
+                t_lower = t.lower()
+                # Exclude "X (via SpeakerName)" style titles
+                if " (via " in t:
+                    return True
+                # Exclude "(as cited by SpeakerName)" style titles
+                if "(as cited by " in t_lower:
+                    return True
+                # Exclude titles that start with "Host " (host intro labels like "Host (introducing Roman Khan)")
+                if t_lower.startswith("host ") or t_lower.startswith("host("):
+                    return True
+                # Exclude titles that look like "Person Name (via ...)" where the speaker name
+                # doesn't appear in the part before the parenthesis
+                if "(" in t:
+                    before_paren = t[:t.index("(")].strip().lower()
+                    # If the part before the paren has words (looks like a name) and
+                    # neither the speaker's first nor last name appears in it, it's likely
+                    # someone else's name with an attribution note
+                    if before_paren and spk_first and spk_last:
+                        if spk_first not in before_paren and spk_last not in before_paren:
+                            # Additional guard: the part after ( should contain attribution language
+                            after_paren = t_lower[t_lower.index("("):]
+                            if any(kw in after_paren for kw in ("via ", "as cited", "quoting", "per ", "citing")):
+                                return True
+                return False
+
             cur.execute(
                 """
                 SELECT DISTINCT ON (i.id) i.id, i.video_id, i.podcast, i.category, i.title, i.description, i.start_time_sec
                 FROM insights i
                 WHERE fts @@ to_tsquery('english', %s)
                 ORDER BY i.id, i.created_at DESC
-                LIMIT 30
+                LIMIT 50
                 """,
                 (name_query,),
             )
@@ -1633,7 +1666,8 @@ def _get_speaker_by_slug(slug: str) -> dict:
                     "via_mention": True,
                 }
                 for r in cur.fetchall()
-            ]
+                if not _is_noisy_via_mention(r[4], speaker_first, speaker_last)
+            ][:30]
 
             # If still none, try searching the segments table for transcript mentions
             # and surface the insights from those episodes
@@ -1646,7 +1680,7 @@ def _get_speaker_by_slug(slug: str) -> dict:
                     JOIN insights i ON i.video_id = t.video_id
                     WHERE s.fts @@ to_tsquery('english', %s)
                     ORDER BY i.id
-                    LIMIT 30
+                    LIMIT 50
                     """,
                     (name_query,),
                 )
@@ -1662,7 +1696,46 @@ def _get_speaker_by_slug(slug: str) -> dict:
                         "via_mention": True,
                     }
                     for r in cur.fetchall()
-                ]
+                    if not _is_noisy_via_mention(r[4], speaker_first, speaker_last)
+                ][:30]
+
+            # Tier 4: Search newsletter_insights for mentions of the speaker's name
+            cur.execute(
+                """
+                SELECT DISTINCT ni.id, ni.newsletter_id, ni.source, ni.category, ni.title, ni.description,
+                       n.subject, n.author, n.published_at
+                FROM newsletter_insights ni
+                JOIN newsletters n ON n.id = ni.newsletter_id
+                WHERE ni.fts @@ to_tsquery('english', %s)
+                ORDER BY ni.id
+                LIMIT 50
+                """,
+                (name_query,),
+            )
+            newsletter_insights = [
+                {
+                    "id": "ni_" + str(r[0]),
+                    "newsletter_id": str(r[1]),
+                    "source": r[2],
+                    "category": r[3],
+                    "title": r[4],
+                    "description": r[5],
+                    "subject": r[6],
+                    "author": r[7],
+                    "published_at": r[8].isoformat() if r[8] else None,
+                    "via_mention": True,
+                    "type": "newsletter",
+                }
+                for r in cur.fetchall()
+                if not _is_noisy_via_mention(r[4], speaker_first, speaker_last)
+            ][:30]
+
+            # Merge and deduplicate by id
+            seen_ids = {i["id"] for i in insights}
+            for ni in newsletter_insights:
+                if ni["id"] not in seen_ids:
+                    insights.append(ni)
+                    seen_ids.add(ni["id"])
 
         speaker["insights"] = insights
         speaker["insights_via_mention"] = any(i.get("via_mention") for i in insights)
