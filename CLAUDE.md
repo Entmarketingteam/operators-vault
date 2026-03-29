@@ -21,7 +21,13 @@ Powers RAG-based Q&A for ENT Agency internal research.
 
 ## n8n Workflows
 - `sbhJSZEELdkQZVnG` — Historical backfill (run manually)
-- `FPWjPuFq2jkPkJmj` — Daily sync (ACTIVE — every 24h, `newer_than:2d`)
+- `FPWjPuFq2jkPkJmj` — Daily sync newsletter (ACTIVE — every 24h, `newer_than:2d`)
+- `n2dv5cUA5ZaF3TPK` — YouTube Auto-Ingest (ACTIVE — daily 2am cron, RSS→dedup→POST /process→Slack #ecas-ops)
+
+## YouTube Channel IDs (for RSS feeds)
+- `UCuGneytUApsb7SEynqoZ0ug` — @Operators9 (9operators + titans)
+- `UCLCl2hY_E08Q9q2X1p6ouMA` — @MarketingOperators (marketing_operator)
+- `UChL5rAxddwU_EnbhZofhDjw` — @FinanceOperatorsFOPS (finance_operators)
 
 ## Gmail Credential
 - n8n credential ID: `DrHd2VFfLvVKxa8N` (Marketingteam@nickient.com) — updated 2026-03-15

@@ -17,6 +17,20 @@ export interface Insight {
   author?: string;
   video_id?: string;
   start_time_sec?: string | number;
+  // Newsletter-specific
+  newsletter_id?: string;
+  subject?: string;
+  via_mention?: boolean;
+}
+
+export interface NewsletterDetail {
+  id: string;
+  source: string;
+  author: string;
+  subject: string;
+  published_at?: string;
+  body_text: string;
+  insights: Array<{ id: string; category: string; title: string; description: string }>;
 }
 
 export interface Speaker {
@@ -34,6 +48,7 @@ export interface Speaker {
   insights?: Insight[];
   is_host?: boolean;
   host_podcast?: string;
+  insights_via_mention?: boolean;
 }
 
 export interface Episode {
@@ -171,6 +186,12 @@ export async function getNewsletterInsights(source?: string, limit = 100): Promi
   if (!res?.ok) return [];
   const data = await res.json();
   return Array.isArray(data) ? data : data.insights || [];
+}
+
+export async function getNewsletterDetail(newsletterId: string): Promise<NewsletterDetail | null> {
+  const res = await fetch(`${API_BASE}/newsletters/${newsletterId}`).catch(() => null);
+  if (!res?.ok) return null;
+  return res.json();
 }
 
 export async function generateTopicGuide(topic: string): Promise<TopicGuide> {

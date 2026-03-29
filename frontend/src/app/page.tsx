@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-import { searchInsights, type Insight } from "@/lib/api";
+import { searchInsights, getNewsletterDetail, type Insight, type NewsletterDetail } from "@/lib/api";
 import {
   Search, Loader2, Sparkles, BookOpen, Users, Lightbulb,
   Quote, BookMarked, MessageSquare, Layers, Play, Mail,
@@ -196,18 +196,18 @@ function getPodcastShortName(podcast?: string): string {
 
 // ─── Spotlight Card ────────────────────────────────────────────────────────
 
-function SpotlightCard({ insight, label }: { insight: Insight; label: string }) {
+function SpotlightCard({ insight, label, onExpand }: { insight: Insight; label: string; onExpand: (i: Insight) => void }) {
   const speaker = insight.speaker_name || insight.speaker;
   const source = insight.podcast ? getPodcastShortName(insight.podcast) : (insight.author || insight.source || "");
   const colorKey = getCategoryColor(insight.category);
   const c = colors[colorKey];
   const isVideo = !!insight.video_id;
-  const youtubeUrl = isVideo
-    ? `https://youtube.com/watch?v=${insight.video_id}&t=${Math.floor(Number(insight.start_time_sec ?? 0))}`
-    : undefined;
 
-  const content = (
-    <div className={`vault-card p-6 mb-6 border ${c.pill.split(" ")[2]} relative overflow-hidden group cursor-pointer`}>
+  return (
+    <button
+      className={`w-full text-left vault-card p-6 mb-6 border ${c.pill.split(" ")[2]} relative overflow-hidden group cursor-pointer`}
+      onClick={() => onExpand(insight)}
+    >
       <div className={`absolute inset-0 opacity-5 ${c.pill.split(" ")[0]}`} />
       <div className="relative">
         <div className="flex items-center gap-2 mb-3">
@@ -233,36 +233,217 @@ function SpotlightCard({ insight, label }: { insight: Insight; label: string }) 
             )}
             {speaker && <span className={`font-medium ${c.text}`}>{speaker}</span>}
           </div>
-          {isVideo && (
-            <span className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border ${c.pill}`}>
-              <Play className="h-3 w-3" /> Watch clip
-            </span>
-          )}
+          <span className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-full border ${c.pill}`}>
+            {isVideo ? <><Play className="h-3 w-3" /> Watch clip</> : <><ExternalLink className="h-3 w-3" /> Read more</>}
+          </span>
         </div>
       </div>
-    </div>
+    </button>
   );
-
-  return youtubeUrl ? (
-    <a href={youtubeUrl} target="_blank" rel="noopener noreferrer">{content}</a>
-  ) : <div>{content}</div>;
 }
 
-// ─── Insight Row ──────────────────────────────────────────────────────────
+// ─── Insight Detail Modal ─────────────────────────────────────────────────
 
-function InsightRow({ insight }: { insight: Insight }) {
+function InsightModal({ insight, onClose }: { insight: Insight; onClose: () => void }) {
   const speaker = insight.speaker_name || insight.speaker;
   const source = insight.podcast ? getPodcastShortName(insight.podcast) : (insight.author || insight.source || "");
+  const colorKey = getCategoryColor(insight.category);
+  const c = colors[colorKey];
   const isVideo = !!insight.video_id;
   const youtubeUrl = isVideo
     ? `https://youtube.com/watch?v=${insight.video_id}&t=${Math.floor(Number(insight.start_time_sec ?? 0))}`
     : undefined;
+  const isNewsletter = !insight.podcast && (insight.author || insight.source);
+
+  const [newsletter, setNewsletter] = useState<NewsletterDetail | null>(null);
+  const [loadingNewsletter, setLoadingNewsletter] = useState(false);
+  const [showFullText, setShowFullText] = useState(false);
+
+  // Load full newsletter when it's a newsletter insight with a newsletter_id
+  useEffect(() => {
+    if (isNewsletter && insight.newsletter_id) {
+      setLoadingNewsletter(true);
+      getNewsletterDetail(insight.newsletter_id).then(d => {
+        setNewsletter(d);
+        setLoadingNewsletter(false);
+      });
+    }
+  }, [insight.newsletter_id, isNewsletter]);
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [onClose]);
+
+  // Group sibling insights by category
+  const siblingsByCategory = newsletter?.insights
+    ? newsletter.insights.reduce((acc, ins) => {
+        if (ins.id === insight.id) return acc; // skip the current one
+        const cat = ins.category || "Other";
+        if (!acc[cat]) acc[cat] = [];
+        acc[cat].push(ins);
+        return acc;
+      }, {} as Record<string, typeof newsletter.insights>)
+    : null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
+
+      <div
+        className="relative z-10 w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto rounded-t-2xl sm:rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-2xl animate-scale-in"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className={`absolute top-0 inset-x-0 h-1 rounded-t-2xl ${c.dot}`} />
+
+        <div className="p-5 sm:p-6">
+          <div className="sm:hidden mx-auto mb-4 h-1 w-10 rounded-full bg-white/20" />
+
+          {/* meta */}
+          <div className="flex flex-wrap items-center gap-2 mb-3">
+            <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-1.5 py-0.5 rounded border ${isNewsletter ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/20" : "bg-indigo-500/10 text-indigo-300 border-indigo-500/20"}`}>
+              {isNewsletter ? <Mail className="h-2.5 w-2.5" /> : <Podcast className="h-2.5 w-2.5" />}
+              {source}
+            </span>
+            {insight.category && (
+              <span className={`text-[11px] px-1.5 py-0.5 rounded border ${c.badge}`}>
+                {insight.category.replace("and", "&")}
+              </span>
+            )}
+            {speaker && <span className={`text-[11px] font-medium ${c.text}`}>{speaker}</span>}
+            {newsletter?.published_at && (
+              <span className="text-[11px] text-[var(--muted-foreground)]">
+                {new Date(newsletter.published_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+              </span>
+            )}
+          </div>
+
+          {/* newsletter subject */}
+          {newsletter?.subject && (
+            <p className="text-[11px] font-semibold text-[var(--muted-foreground)] mb-2 italic">&ldquo;{newsletter.subject}&rdquo;</p>
+          )}
+
+          {/* title */}
+          <h2 className="text-base sm:text-lg font-bold leading-snug mb-3">
+            {insight.title?.replace(/\*\*/g, "")}
+          </h2>
+
+          {/* description */}
+          {insight.description && (
+            <p className="text-sm text-[var(--muted-foreground)] leading-relaxed whitespace-pre-wrap">
+              {insight.description}
+            </p>
+          )}
+
+          {/* ── Newsletter extras ── */}
+          {isNewsletter && (
+            <div className="mt-5 space-y-4">
+              {loadingNewsletter && (
+                <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Loading full newsletter…
+                </div>
+              )}
+
+              {/* Sibling insights from the same issue */}
+              {siblingsByCategory && Object.keys(siblingsByCategory).length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="h-px flex-1 bg-[var(--border)]" />
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] whitespace-nowrap">
+                      {newsletter!.insights.length - 1} more insights from this issue
+                    </span>
+                    <div className="h-px flex-1 bg-[var(--border)]" />
+                  </div>
+                  <div className="space-y-3">
+                    {Object.entries(siblingsByCategory).map(([cat, items]) => {
+                      const catColor = getCategoryColor(cat);
+                      const cc = colors[catColor];
+                      return (
+                        <div key={cat}>
+                          <span className={`text-[10px] font-bold uppercase tracking-widest ${cc.text}`}>
+                            {cat.replace("and", "&")}
+                          </span>
+                          <div className="mt-1 space-y-1">
+                            {items.map(ins => (
+                              <div key={ins.id} className={`rounded-lg border ${cc.badge} px-3 py-2`}>
+                                <p className="text-xs font-semibold leading-snug">{ins.title?.replace(/\*\*/g, "")}</p>
+                                {ins.description && (
+                                  <p className="text-[11px] text-[var(--muted-foreground)] mt-0.5 line-clamp-2">{ins.description}</p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Full newsletter body text */}
+              {newsletter?.body_text && newsletter.body_text.length > 100 && (
+                <div>
+                  <button
+                    onClick={() => setShowFullText(v => !v)}
+                    className="flex items-center gap-2 text-xs font-semibold text-indigo-400 hover:text-indigo-300 transition-colors"
+                  >
+                    <FileText className="h-3.5 w-3.5" />
+                    {showFullText ? "Hide" : "Read"} full newsletter ({Math.round(newsletter.body_text.length / 1000)}k chars)
+                  </button>
+                  {showFullText && (
+                    <div className="mt-3 p-4 rounded-xl bg-white/3 border border-[var(--border)] text-xs text-[var(--muted-foreground)] leading-relaxed whitespace-pre-wrap max-h-96 overflow-y-auto">
+                      {newsletter.body_text}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* actions */}
+          <div className="flex items-center gap-3 mt-5 pt-4 border-t border-[var(--border)]">
+            {youtubeUrl && (
+              <a
+                href={youtubeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg border ${c.pill}`}
+              >
+                <Play className="h-3.5 w-3.5" /> Watch clip
+              </a>
+            )}
+            <button
+              onClick={onClose}
+              className="ml-auto text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Insight Row ──────────────────────────────────────────────────────────
+
+function InsightRow({ insight, onExpand }: { insight: Insight; onExpand: (i: Insight) => void }) {
+  const speaker = insight.speaker_name || insight.speaker;
+  const source = insight.podcast ? getPodcastShortName(insight.podcast) : (insight.author || insight.source || "");
   const colorKey = getCategoryColor(insight.category);
   const c = colors[colorKey];
   const isNewsletter = !insight.podcast && (insight.author || insight.source);
 
-  const inner = (
-    <div className="group flex items-start gap-3 px-4 py-4 sm:py-3.5 vault-card hover:border-indigo-500/30 transition-all cursor-pointer">
+  return (
+    <button
+      className="w-full text-left group flex items-start gap-3 px-4 py-4 sm:py-3.5 vault-card hover:border-indigo-500/30 transition-all cursor-pointer"
+      onClick={() => onExpand(insight)}
+    >
       <div className={`shrink-0 mt-2 h-1.5 w-1.5 rounded-full ${c.dot}`} />
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-1.5 mb-1">
@@ -276,10 +457,10 @@ function InsightRow({ insight }: { insight: Insight }) {
             </span>
           )}
         </div>
-        <p className="text-sm font-semibold leading-snug group-hover:text-indigo-300 transition-colors line-clamp-1">
+        <p className="text-sm font-semibold leading-snug group-hover:text-indigo-300 transition-colors line-clamp-2">
           {insight.title?.replace(/\*\*/g, "")}
         </p>
-        <p className="text-xs text-[var(--muted-foreground)] leading-relaxed line-clamp-1 mt-0.5">
+        <p className="text-xs text-[var(--muted-foreground)] leading-relaxed line-clamp-2 mt-0.5">
           {insight.description}
         </p>
         {speaker && (
@@ -289,20 +470,10 @@ function InsightRow({ insight }: { insight: Insight }) {
         )}
       </div>
       <div className="shrink-0 flex items-center self-center ml-2">
-        {isVideo ? (
-          <span className="flex items-center gap-1 text-xs text-indigo-400 font-medium opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-            <Play className="h-3 w-3" /> Watch
-          </span>
-        ) : (
-          <ExternalLink className="h-3.5 w-3.5 text-[var(--muted-foreground)] opacity-0 group-hover:opacity-60 transition-opacity" />
-        )}
+        <ExternalLink className="h-3.5 w-3.5 text-[var(--muted-foreground)] opacity-0 group-hover:opacity-60 transition-opacity" />
       </div>
-    </div>
+    </button>
   );
-
-  return youtubeUrl
-    ? <a href={youtubeUrl} target="_blank" rel="noopener noreferrer">{inner}</a>
-    : inner;
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────
@@ -316,6 +487,7 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
+  const [selectedInsight, setSelectedInsight] = useState<Insight | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -667,17 +839,23 @@ export default function HomePage() {
                 <SpotlightCard
                   insight={spotlight}
                   label={activeTopic || CONTENT_TYPES.find(t => t.value === typeFilter)?.label || "Top Result"}
+                  onExpand={setSelectedInsight}
                 />
               </div>
             )}
             <div className="space-y-1 stagger">
               {(hasFilters ? listResults : results).map((insight, i) => (
-                <InsightRow key={insight.id || i} insight={insight} />
+                <InsightRow key={insight.id || i} insight={insight} onExpand={setSelectedInsight} />
               ))}
             </div>
           </>
         )}
       </div>
+
+      {/* Insight detail modal */}
+      {selectedInsight && (
+        <InsightModal insight={selectedInsight} onClose={() => setSelectedInsight(null)} />
+      )}
     </div>
   );
 }
