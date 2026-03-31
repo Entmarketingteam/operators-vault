@@ -16,3 +16,4 @@ wheels/
 *.whl
 .vercel
 .env*.local
+.claude/
