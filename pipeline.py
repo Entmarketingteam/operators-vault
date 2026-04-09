@@ -395,7 +395,9 @@ def _process_one(
     if db_url:
         import psycopg2
 
-        conn = psycopg2.connect(db_url)
+        # Supabase transaction pooler (port 6543) defaults to a short statement_timeout.
+        # Override at session level so multi-hundred-row inserts don't get killed.
+        conn = psycopg2.connect(db_url, options="-c statement_timeout=600000")
         cur = conn.cursor()
         cur.execute("DELETE FROM transcriptions WHERE video_id = %s", (video_id,))
         cur.execute(
@@ -403,14 +405,22 @@ def _process_one(
             (video_id, raw),
         )
         trans_id = cur.fetchone()[0]
-        for u in utterances:
+        # Commit transcription row immediately so a downstream segments failure
+        # doesn't leave us with no transcription at all.
+        conn.commit()
+        for i, u in enumerate(utterances):
             st, et = u.get("start"), u.get("end")
             if st is not None and et is not None:
                 cur.execute(
                     "INSERT INTO segments (transcription_id, start_time_sec, end_time_sec, text, speaker_label) VALUES (%s,%s,%s,%s,%s)",
                     (trans_id, float(st), float(et), (u.get("transcript") or ""), str(u.get("speaker") or "")),
                 )
+            # Commit every 200 segments to avoid huge transactions
+            if (i + 1) % 200 == 0:
+                conn.commit()
         conn.commit()
+        cur.close()
+        conn.close()
 
     # 5) Chunk and extract insights
     chunks = _chunk_text(raw, size=6000, overlap=500)
@@ -430,11 +440,12 @@ def _process_one(
     if db_url:
         import psycopg2
 
-        conn = psycopg2.connect(db_url)
+        conn = psycopg2.connect(db_url, options="-c statement_timeout=600000")
         cur = conn.cursor()
         cur.execute("DELETE FROM insights WHERE video_id = %s", (video_id,))
         # Phase 2: Extract people from segments
         speaker_to_id = extract_people_from_segments(cur, video_id)
+        conn.commit()  # commit deletes + people before bulk insight insert
     else:
         conn = None
         cur = None
@@ -472,8 +483,13 @@ def _process_one(
                 companies = extract_companies_from_text(insight_text)
                 if companies:
                     link_insights_to_companies(cur, ins_id, companies)
+            # Commit each insight individually so a single hung statement
+            # only loses one row, not the entire batch.
+            if conn and (j + 1) % 25 == 0:
+                conn.commit()
 
     if conn:
+        conn.commit()  # commit any remaining insights before downstream stages
         # Phase 2: Link insights to people based on speaker_label
         if speaker_to_id:
             link_insights_to_people(cur, video_id, speaker_to_id)
