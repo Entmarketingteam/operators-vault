@@ -75,10 +75,11 @@ export interface ChatMessage {
   sources?: Insight[];
 }
 
-export async function searchInsights(query: string, token?: string, podcast?: string): Promise<Insight[]> {
+export async function searchInsights(query: string, token?: string, podcast?: string, limit = 100): Promise<Insight[]> {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
   if (podcast) params.set("podcast", podcast);
+  params.set("limit", String(limit));
 
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;

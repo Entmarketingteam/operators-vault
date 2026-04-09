@@ -587,6 +587,12 @@ export default function HomePage() {
     return acc;
   }, {} as Record<string, number>);
 
+  const sourceBreakdown = results.reduce((acc, r) => {
+    const key = r.podcast ? getPodcastShortName(r.podcast) : (r.author || r.source || "Newsletter");
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
   return (
     <div className="flex min-h-[calc(100vh-4rem)]">
 
@@ -803,17 +809,43 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* Result count */}
+        {/* Result count + source breakdown */}
         {!loading && (
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-xs text-[var(--muted-foreground)]">
-              {results.length} insight{results.length !== 1 ? "s" : ""}
-              {activeTopic ? ` on ${activeTopic}` : typeFilter ? ` · ${CONTENT_TYPES.find(t => t.value === typeFilter)?.label}` : ""}
-            </span>
-            {!session && sessionLoaded && (
-              <button onClick={() => signInWithGoogle()} className="text-xs text-indigo-400 hover:underline hidden sm:inline">
-                Sign in for video insights →
-              </button>
+          <div className="mb-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-semibold">
+                  {results.length} insight{results.length !== 1 ? "s" : ""}
+                </span>
+                {activeTopic && (
+                  <span className="text-xs text-[var(--muted-foreground)]">on <span className="text-[var(--foreground)]">{activeTopic}</span></span>
+                )}
+                {/* Source breakdown dots */}
+                {results.length > 0 && (
+                  <span className="flex items-center gap-2 flex-wrap">
+                    {Object.entries(sourceBreakdown).sort((a, b) => b[1] - a[1]).map(([src, count]) => (
+                      <span key={src} className="text-[11px] text-[var(--muted-foreground)] flex items-center gap-1">
+                        <span className="h-1 w-1 rounded-full bg-indigo-400/60 inline-block" />
+                        {count} from {src}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </div>
+              {!session && sessionLoaded && (
+                <button onClick={() => signInWithGoogle()} className="text-xs text-indigo-400 hover:underline hidden sm:inline shrink-0">
+                  Sign in for video insights →
+                </button>
+              )}
+            </div>
+            {/* Thin results nudge */}
+            {results.length < 6 && hasFilters && (
+              <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)] bg-indigo-500/5 border border-indigo-500/20 rounded-lg px-3 py-2">
+                <BookOpen className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                <span>Limited coverage on this topic — try</span>
+                <Link href="/ask" className="text-indigo-400 hover:text-indigo-300 font-medium underline underline-offset-2">Ask the Vault</Link>
+                <span>for a synthesized answer.</span>
+              </div>
             )}
           </div>
         )}
