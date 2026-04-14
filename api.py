@@ -2695,7 +2695,23 @@ def ingest_newsletter(req: NewsletterIngestRequest):
 
         return {"email_id": req.email_id, "newsletter_id": newsletter_id, "status": "queued", "insights_count": 0}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {e!s}")
+        # Log with structured context so Railway logs surface the real reason
+        # instead of n8n's opaque "service was not able to process your request".
+        _log.exception(
+            "ingest_newsletter_failed",
+            extra={
+                "email_id": req.email_id,
+                "source": source,
+                "subject": (req.subject or "")[:120],
+                "body_text_len": len(req.body_text or ""),
+                "body_html_len": len(req.body_html or ""),
+                "error_type": type(e).__name__,
+            },
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Ingestion failed ({type(e).__name__}): {e!s}",
+        )
 
 
 @app.post("/process-newsletters")

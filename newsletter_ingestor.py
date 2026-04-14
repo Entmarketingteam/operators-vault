@@ -10,7 +10,6 @@ from __future__ import annotations
 import html
 import os
 import re
-import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -165,25 +164,33 @@ def extract_newsletter_insights(text: str) -> list[dict[str, str]]:
 
 # ── Supabase storage ───────────────────────────────────────────────────────────
 
-_pool = None
-_pool_lock = threading.Lock()
+# Newsletter sync runs once every 24h, so connection pooling buys us nothing
+# and actively hurts: Supabase's transaction pooler drops idle connections
+# and hands us back dead sockets on the next run. We use fresh connections
+# with TCP keepalives + a generous statement_timeout override (mirroring the
+# fix applied to pipeline.py in bc1f21d).
 
-def _get_pool():
-    global _pool
-    if _pool is None:
-        with _pool_lock:
-            if _pool is None:
-                import psycopg2.pool
-                url = os.environ.get("DATABASE_URL", "")
-                _pool = psycopg2.pool.ThreadedConnectionPool(2, 10, url, sslmode="require")
-    return _pool
+# Connection options:
+# - statement_timeout=60000 (60s) overrides the pooler's short default so
+#   upserts on long body_text values don't get killed.
+# - keepalives detect dead TCP sockets quickly so we fail fast rather than
+#   hanging on a half-open connection.
+_PG_CONNECT_KWARGS = {
+    "sslmode": "require",
+    "options": "-c statement_timeout=60000",
+    "connect_timeout": 15,
+    "keepalives": 1,
+    "keepalives_idle": 30,
+    "keepalives_interval": 10,
+    "keepalives_count": 3,
+}
 
 
 def _db_conn():
-    """Return a connection from the pool (caller must call pool.putconn when done)."""
+    """Return a fresh psycopg2 connection. Caller must close it."""
     import psycopg2
     url = os.environ.get("DATABASE_URL", "")
-    return psycopg2.connect(url, sslmode="require")
+    return psycopg2.connect(url, **_PG_CONNECT_KWARGS)
 
 
 def upsert_newsletter(
@@ -198,8 +205,7 @@ def upsert_newsletter(
     Insert newsletter row. Returns (newsletter_id, is_new).
     Skips if already processed.
     """
-    pool = _get_pool()
-    conn = pool.getconn()
+    conn = _db_conn()
     try:
         with conn.cursor() as cur:
             # Check existing
@@ -229,13 +235,15 @@ def upsert_newsletter(
             conn.commit()
             return nl_id, True
     finally:
-        pool.putconn(conn)
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def store_newsletter_insights(newsletter_id: str, source: str, insights: list[dict]) -> int:
     """Insert extracted insights and mark newsletter processed. Returns count inserted."""
-    pool = _get_pool()
-    conn = pool.getconn()
+    conn = _db_conn()
     try:
         with conn.cursor() as cur:
             for ins in insights:
@@ -258,7 +266,10 @@ def store_newsletter_insights(newsletter_id: str, source: str, insights: list[di
             conn.commit()
         return len(insights)
     finally:
-        pool.putconn(conn)
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 # ── Main entry point ───────────────────────────────────────────────────────────
