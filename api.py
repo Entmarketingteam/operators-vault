@@ -2714,6 +2714,70 @@ def ingest_newsletter(req: NewsletterIngestRequest):
         )
 
 
+@app.get("/health/newsletter-sync")
+def health_newsletter_sync(max_hours_stale: int = 36):
+    """
+    Freshness check for the daily newsletter sync (n8n workflow FPWjPuFq2jkPkJmj).
+
+    Returns 200 when we've ingested a newsletter within `max_hours_stale` hours,
+    503 otherwise. Point an uptime monitor at this and you'll know within hours
+    that the sync silently broke, instead of discovering it days later.
+
+    Response body:
+      {
+        "status": "ok" | "stale" | "unknown",
+        "last_ingested_at": ISO8601 | null,
+        "hours_since": float | null,
+        "max_hours_stale": int
+      }
+    """
+    from newsletter_ingestor import _db_conn
+    from datetime import datetime, timezone
+
+    try:
+        conn = _db_conn()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT MAX(created_at) FROM newsletters")
+                row = cur.fetchone()
+        finally:
+            conn.close()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"DB check failed: {e!s}")
+
+    last = row[0] if row else None
+    if last is None:
+        return {
+            "status": "unknown",
+            "last_ingested_at": None,
+            "hours_since": None,
+            "max_hours_stale": max_hours_stale,
+        }
+
+    now = datetime.now(timezone.utc)
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    hours_since = (now - last).total_seconds() / 3600.0
+
+    if hours_since > max_hours_stale:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "status": "stale",
+                "last_ingested_at": last.isoformat(),
+                "hours_since": round(hours_since, 2),
+                "max_hours_stale": max_hours_stale,
+            },
+        )
+
+    return {
+        "status": "ok",
+        "last_ingested_at": last.isoformat(),
+        "hours_since": round(hours_since, 2),
+        "max_hours_stale": max_hours_stale,
+    }
+
+
 @app.post("/process-newsletters")
 def process_newsletters(limit: int = 50):
     """

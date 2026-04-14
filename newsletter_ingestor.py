@@ -52,11 +52,10 @@ def load_newsletter_sources_from_db() -> dict:
     Falls back to _NEWSLETTER_SOURCES_FALLBACK on any error.
     """
     try:
-        import psycopg2
-        url = os.environ.get("DATABASE_URL", "")
-        if not url:
+        from db import connect as _db_connect
+        if not os.environ.get("DATABASE_URL"):
             return _NEWSLETTER_SOURCES_FALLBACK
-        conn = psycopg2.connect(url, sslmode="require")
+        conn = _db_connect()
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT slug, author, gmail_query FROM newsletter_source_configs WHERE active = TRUE ORDER BY created_at"
@@ -167,30 +166,11 @@ def extract_newsletter_insights(text: str) -> list[dict[str, str]]:
 # Newsletter sync runs once every 24h, so connection pooling buys us nothing
 # and actively hurts: Supabase's transaction pooler drops idle connections
 # and hands us back dead sockets on the next run. We use fresh connections
-# with TCP keepalives + a generous statement_timeout override (mirroring the
-# fix applied to pipeline.py in bc1f21d).
-
-# Connection options:
-# - statement_timeout=60000 (60s) overrides the pooler's short default so
-#   upserts on long body_text values don't get killed.
-# - keepalives detect dead TCP sockets quickly so we fail fast rather than
-#   hanging on a half-open connection.
-_PG_CONNECT_KWARGS = {
-    "sslmode": "require",
-    "options": "-c statement_timeout=60000",
-    "connect_timeout": 15,
-    "keepalives": 1,
-    "keepalives_idle": 30,
-    "keepalives_interval": 10,
-    "keepalives_count": 3,
-}
-
-
+# via db.connect(), which applies statement_timeout + TCP keepalives.
 def _db_conn():
     """Return a fresh psycopg2 connection. Caller must close it."""
-    import psycopg2
-    url = os.environ.get("DATABASE_URL", "")
-    return psycopg2.connect(url, **_PG_CONNECT_KWARGS)
+    from db import connect as _db_connect
+    return _db_connect()
 
 
 def upsert_newsletter(

@@ -123,6 +123,56 @@ git push
 | `POST /process-one/async` | Ingest a single YouTube video by ID |
 | `POST /chat` | RAG Q&A (auth required) |
 | `GET /channels` | Active YouTube channel configs |
+| `GET /health/newsletter-sync` | Freshness check — 503 if no newsletter ingested in 36h |
+
+---
+
+## Guardrails (read before touching DB code)
+
+### 1. Always use `db.connect()` — never `psycopg2.connect()` directly
+Every Postgres connection MUST go through `db.connect()` in `db.py`. It applies
+`statement_timeout`, TCP keepalives, and `connect_timeout` — all required
+because Supabase's transaction pooler silently kills long/idle connections.
+
+The CI workflow `.github/workflows/lint.yml` runs `scripts/check_db_connections.py`
+on every push/PR and **fails if the number of direct `psycopg2.connect()`
+calls goes up** (ratchet-based: current baseline is 61 legacy sites that we're
+migrating incrementally). When you migrate a call site, decrement the
+`BASELINE` constant in the same PR.
+
+**Migration pattern:**
+```python
+# Before
+conn = psycopg2.connect(db_url, connect_timeout=10)
+
+# After
+from db import connect
+conn = connect(db_url)
+# For batch jobs that need longer timeouts:
+conn = connect(db_url, statement_timeout_ms=600_000)
+```
+
+### 2. No long-lived connection pools for infrequent jobs
+If a code path runs less often than Supabase's pooler idle timeout
+(~10 min), don't use `psycopg2.pool.*`. The pool will hand out dead
+sockets on the next run. Use fresh connections from `db.connect()`.
+
+This is the bug that killed newsletter sync for a week
+(commit `3525804`). Don't repeat it.
+
+### 3. Log before raising from webhook/cron endpoints
+Any endpoint called by n8n, Railway cron, or an external webhook must
+`_log.exception("<event>", extra={...structured context...})` before
+raising `HTTPException`. Otherwise the caller just sees "The service was
+not able to process your request" and you have zero signal to debug.
+
+Include the exception type in the HTTP detail: `f"... ({type(e).__name__}): {e!s}"`.
+
+### 4. Monitor data freshness, not just workflow runs
+For every pipeline that writes to a table on a schedule, add a freshness
+endpoint (see `GET /health/newsletter-sync`) and point an uptime monitor
+at it. Workflow-failure emails only catch *known* failures — freshness
+checks catch silent breakage (Gmail auth expiry, broken parsers, etc.).
 
 ---
 

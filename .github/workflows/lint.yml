@@ -1,0 +1,33 @@
+name: lint
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  guardrails:
+    name: Guardrails (db connections, syntax)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Enforce: no new direct psycopg2.connect() calls outside db.py.
+      # Every connection must go through db.connect() so statement_timeout,
+      # keepalives, and connect_timeout are applied.
+      # See scripts/check_db_connections.py for policy + migration instructions.
+      - name: Check DB connection ratchet
+        run: python3 scripts/check_db_connections.py
+
+      # Cheap safety net: catch broken Python before Railway deploy.
+      - name: Python syntax check
+        run: |
+          python3 -m compileall -q api.py pipeline.py newsletter_ingestor.py \
+            insight_extractor.py newsletter_ingestor.py db.py \
+            youtube_client.py youtube_transcript.py audio_extractor.py \
+            deepgram_client.py people_extractor.py company_extractor.py \
+            visual_extractor.py structured_logger.py local_rest_processor.py
