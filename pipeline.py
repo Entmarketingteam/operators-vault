@@ -118,22 +118,54 @@ def _ensure_video(
         )
     except psycopg2.ProgrammingError as e:
         if "does not exist" in str(e) or "column" in str(e).lower():
-            # Minimal schema (no view_count, like_count, etc.): upsert only base columns
-            cursor.connection.rollback()
-            cursor.execute(
-                """
-                INSERT INTO videos (video_id, podcast, title, duration_seconds, channel_id, published_at)
-                VALUES (%s, %s, %s, %s, %s, %s::timestamptz)
-                ON CONFLICT (video_id) DO UPDATE SET
-                  podcast = EXCLUDED.podcast,
-                  title = COALESCE(NULLIF(EXCLUDED.title,''), videos.title),
-                  duration_seconds = COALESCE(EXCLUDED.duration_seconds, videos.duration_seconds),
-                  channel_id = COALESCE(EXCLUDED.channel_id, videos.channel_id),
-                  published_at = COALESCE(EXCLUDED.published_at, videos.published_at),
-                  updated_at = now()
-                """,
-                (video_id, podcast, title or "", duration_seconds, channel_id, published_at),
-            )
+            # Minimal schema (no view_count, like_count, etc.): upsert only base columns.
+            # Use a fresh connection for the fallback — the rollback on a pooler-closed
+            # connection raises "SSL connection has been closed unexpectedly" which masks
+            # the real ProgrammingError and prevents the fallback from executing.
+            try:
+                cursor.connection.rollback()
+            except Exception:
+                pass  # Connection may already be dead; ignore rollback failure
+            try:
+                cursor.execute(
+                    """
+                    INSERT INTO videos (video_id, podcast, title, duration_seconds, channel_id, published_at)
+                    VALUES (%s, %s, %s, %s, %s, %s::timestamptz)
+                    ON CONFLICT (video_id) DO UPDATE SET
+                      podcast = EXCLUDED.podcast,
+                      title = COALESCE(NULLIF(EXCLUDED.title,''), videos.title),
+                      duration_seconds = COALESCE(EXCLUDED.duration_seconds, videos.duration_seconds),
+                      channel_id = COALESCE(EXCLUDED.channel_id, videos.channel_id),
+                      published_at = COALESCE(EXCLUDED.published_at, videos.published_at),
+                      updated_at = now()
+                    """,
+                    (video_id, podcast, title or "", duration_seconds, channel_id, published_at),
+                )
+            except Exception:
+                # Connection is completely dead — open a fresh one and retry
+                import os as _os
+                _db_url = _os.environ.get("DATABASE_URL", "")
+                if not _db_url:
+                    raise
+                _fresh_conn = psycopg2.connect(_db_url)
+                _fresh_cur = _fresh_conn.cursor()
+                _fresh_cur.execute(
+                    """
+                    INSERT INTO videos (video_id, podcast, title, duration_seconds, channel_id, published_at)
+                    VALUES (%s, %s, %s, %s, %s, %s::timestamptz)
+                    ON CONFLICT (video_id) DO UPDATE SET
+                      podcast = EXCLUDED.podcast,
+                      title = COALESCE(NULLIF(EXCLUDED.title,''), videos.title),
+                      duration_seconds = COALESCE(EXCLUDED.duration_seconds, videos.duration_seconds),
+                      channel_id = COALESCE(EXCLUDED.channel_id, videos.channel_id),
+                      published_at = COALESCE(EXCLUDED.published_at, videos.published_at),
+                      updated_at = now()
+                    """,
+                    (video_id, podcast, title or "", duration_seconds, channel_id, published_at),
+                )
+                _fresh_conn.commit()
+                _fresh_cur.close()
+                _fresh_conn.close()
         else:
             raise
 

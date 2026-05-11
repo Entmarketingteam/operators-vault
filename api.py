@@ -626,17 +626,23 @@ def run_migrate_phase1():
     ]
     # Only run DDL (e.g. ALTER TABLE); skip comment fragments that contained ";"
     statements = [s for s in statements if s.upper().startswith("ALTER TABLE")]
-    try:
-        conn = psycopg2.connect(db_url)
-        conn.autocommit = True
-        cur = conn.cursor()
-        for stmt in statements:
+    results = []
+    for stmt in statements:
+        # Each DDL statement gets its own fresh connection to avoid pooler SSL drops
+        try:
+            conn = psycopg2.connect(db_url)
+            conn.autocommit = True
+            cur = conn.cursor()
             cur.execute(stmt + ";" if not stmt.rstrip().endswith(";") else stmt)
-        cur.close()
-        conn.close()
-        return {"ok": True, "message": "Phase 1 migration applied."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Migration failed: {e!s}")
+            cur.close()
+            conn.close()
+            results.append({"stmt": stmt[:60], "ok": True})
+        except Exception as e:
+            results.append({"stmt": stmt[:60], "ok": False, "error": str(e)})
+    failed = [r for r in results if not r["ok"]]
+    if failed:
+        raise HTTPException(status_code=500, detail=f"Migration failed: {failed}")
+    return {"ok": True, "message": "Phase 1 migration applied.", "results": results}
 
 
 @app.get("/health")
