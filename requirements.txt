@@ -22,3 +22,5 @@ deepgram-sdk>=5.0.0
 
 # Auth (Supabase JWT for private search)
 PyJWT>=2.8.0
+
+# Build cache bust: 2026-05-11
