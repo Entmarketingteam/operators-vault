@@ -10,6 +10,7 @@ from __future__ import annotations
 import atexit
 import contextlib
 import io
+import logging
 import os
 import signal
 import sys
@@ -77,7 +78,12 @@ def _run_startup_migration() -> None:
     if not db_url:
         return
     import psycopg2
-    for migration_name in ("add_channel_configs.sql", "add_speaker_profiles.sql", "add_host_fields.sql"):
+    for migration_name in (
+        "add_channel_configs.sql",
+        "add_speaker_profiles.sql",
+        "add_host_fields.sql",
+        "migrate_newsletter_retry.sql",
+    ):
         migration_path = _root / "sql" / migration_name
         if not migration_path.exists():
             _log.warning("startup_migration_missing", extra={"path": str(migration_path)})
@@ -376,16 +382,20 @@ def _do_sync(job_id: str | None = None) -> dict:
     if errors:
         _log.warning("%d videos failed to process. First error: %s", len(errors), errors[0])
 
-    # Extract insights for any newly processed videos
+    # NOTE: We previously called _do_extract_insights_from_transcripts here as a
+    # "safety net" to catch any videos that got transcribed but not insighted.
+    # That call is redundant for the happy path: _process_one already extracts
+    # insights inline (see pipeline.py step 5), and the backfill query filters
+    # `WHERE video_id NOT IN (SELECT video_id FROM insights)` — so freshly
+    # processed videos are filtered out. Calling it here only wastes a DB
+    # round-trip in the common case and re-runs Claude only for partially-
+    # processed historical videos (which should be repaired explicitly via
+    # POST /extract-insights-backfill, not silently during cron sync).
     if processed:
-        _log.info("Sync: extracting insights for %d newly processed videos", len(processed))
-        if job_id:
-            _update_job_heartbeat(job_id, progress=f"extracting insights for {len(processed)} new videos")
-        try:
-            insight_result = _do_extract_insights_from_transcripts(job_id=job_id, limit=len(processed) + 10)
-            _log.info("Sync insight extraction: %s", insight_result)
-        except Exception as e:
-            _log.warning("Sync: insight extraction failed (non-fatal): %s", e)
+        _log.info(
+            "Sync: %d videos processed; insights extracted inline by _process_one",
+            len(processed),
+        )
 
     _log.info("Sync complete: upserted=%d processed=%d errors=%d", upserted, len(processed), len(errors))
     return {"ok": True, "upserted": upserted, "processed": len(processed), "video_ids": processed, "errors": errors[:5]}
@@ -2227,9 +2237,43 @@ def _run_async_job(job_id: str, fn, job_type: str):
         hb.start()
         buf_out = io.StringIO()
         buf_err = io.StringIO()
+
+        # Per-thread log capture: attach a StreamHandler to the root logger
+        # that ONLY accepts records emitted on this worker thread. This is
+        # necessary because structured_logger.py binds StreamHandler(sys.stderr)
+        # at import time, so contextlib.redirect_stderr cannot intercept it.
+        # We filter on thread name to keep concurrent jobs isolated.
+        thread_name = threading.current_thread().name
+        log_buf = io.StringIO()
+        log_handler = logging.StreamHandler(log_buf)
+        try:
+            from structured_logger import JSONFormatter
+            log_handler.setFormatter(JSONFormatter())
+        except Exception:
+            log_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+
+        class _ThreadFilter(logging.Filter):
+            def __init__(self, name: str):
+                super().__init__()
+                self._target = name
+            def filter(self, record: logging.LogRecord) -> bool:
+                return record.threadName == self._target
+
+        log_handler.addFilter(_ThreadFilter(thread_name))
+        log_handler.setLevel(logging.INFO)
+        root_logger = logging.getLogger()
+        root_logger.addHandler(log_handler)
+
+        def _drain_logs() -> str:
+            try:
+                return log_buf.getvalue()[-16000:]
+            except Exception:
+                return ""
+
         try:
             with contextlib.redirect_stdout(buf_out), contextlib.redirect_stderr(buf_err):
                 out = fn()
+            captured_logs = _drain_logs()
             with _jobs_lock:
                 _jobs[job_id]["status"] = "done"
                 _jobs[job_id]["result"] = out
@@ -2237,10 +2281,29 @@ def _run_async_job(job_id: str, fn, job_type: str):
                 _jobs[job_id]["logs"] = {
                     "stdout": buf_out.getvalue()[-8000:],
                     "stderr": buf_err.getvalue()[-8000:],
+                    "captured": captured_logs,
                 }
             log_job_event(job_id, "completed", {"type": job_type, "result_keys": list((out or {}).keys()) if isinstance(out, dict) else None})
+
+            # Surface logical failures: if result has ok=False, alert + log.
+            # Without this, /process-one/async returns ok:false silently
+            # because HTTP-level the job "completed".
+            if isinstance(out, dict) and out.get("ok") is False:
+                detail = ""
+                if "video_id" in out:
+                    detail = f" video={out.get('video_id')} podcast={out.get('podcast')}"
+                tail = captured_logs[-1500:] if captured_logs else "(no logs captured)"
+                _log.warning(
+                    "job_returned_ok_false",
+                    extra={"job_id": job_id, "type": job_type, "result": out},
+                )
+                _notify_slack(
+                    f":warning: Operators Vault {job_type} returned ok:false{detail}\n"
+                    f"Job: {job_id}\nTail logs:\n```\n{tail}\n```"
+                )
         except HTTPException as e:
             err_str = f"{e.status_code}: {e.detail}"
+            captured_logs = _drain_logs()
             with _jobs_lock:
                 _jobs[job_id]["status"] = "error"
                 _jobs[job_id]["error"] = err_str
@@ -2248,11 +2311,13 @@ def _run_async_job(job_id: str, fn, job_type: str):
                 _jobs[job_id]["logs"] = {
                     "stdout": buf_out.getvalue()[-8000:],
                     "stderr": (buf_err.getvalue() + "\n" + traceback.format_exc())[-8000:],
+                    "captured": captured_logs,
                 }
             log_job_event(job_id, "failed", {"type": job_type, "error": err_str})
             _notify_slack(f":rotating_light: Operators Vault sync failed\nJob: {job_type}\nError: {err_str[:200]}")
         except Exception as e:
             err_str = f"{type(e).__name__}: {e!s}"
+            captured_logs = _drain_logs()
             with _jobs_lock:
                 _jobs[job_id]["status"] = "error"
                 _jobs[job_id]["error"] = err_str
@@ -2260,11 +2325,17 @@ def _run_async_job(job_id: str, fn, job_type: str):
                 _jobs[job_id]["logs"] = {
                     "stdout": buf_out.getvalue()[-8000:],
                     "stderr": (buf_err.getvalue() + "\n" + traceback.format_exc())[-8000:],
+                    "captured": captured_logs,
                 }
             log_job_event(job_id, "failed", {"type": job_type, "error": err_str})
             _notify_slack(f":rotating_light: Operators Vault sync failed\nJob: {job_type}\nError: {err_str[:200]}")
         finally:
             heartbeat_stop.set()
+            try:
+                root_logger.removeHandler(log_handler)
+                log_handler.close()
+            except Exception:
+                pass
 
     t = threading.Thread(target=run, daemon=True, name=f"job-{job_id[:8]}")
     t.start()
@@ -2600,34 +2671,108 @@ _newsletter_extract_queue: _queue.Queue = _queue.Queue()
 _newsletter_worker_started = False
 _NEWSLETTER_WORKERS = 4  # parallel Claude extraction threads
 
+_NEWSLETTER_MAX_RETRIES = int(os.environ.get("NEWSLETTER_MAX_RETRIES", "3"))
+
+
 def _newsletter_extract_worker():
-    """Background thread: pick up newsletter_ids and run Claude extraction."""
+    """Background thread: pick up newsletter_ids and run Claude extraction.
+
+    On failure, increment retry_count and re-queue up to _NEWSLETTER_MAX_RETRIES
+    attempts. After that, dead-letter by marking processed=TRUE with last_error
+    set so the row stops blocking the queue and is visible to ops.
+    """
     import psycopg2
     from newsletter_ingestor import extract_newsletter_insights, store_newsletter_insights, chunk_text, _db_conn
     while True:
         try:
             newsletter_id, source, body_text = _newsletter_extract_queue.get(timeout=5)
             try:
-                # Skip if already processed (handles duplicates in queue)
+                # Skip if already processed (handles duplicates in queue).
+                # Also pull retry_count so we can apply the dead-letter cap.
                 conn = _db_conn()
                 with conn.cursor() as cur:
-                    cur.execute("SELECT processed FROM newsletters WHERE id = %s", (newsletter_id,))
+                    cur.execute(
+                        "SELECT processed, COALESCE(retry_count, 0) FROM newsletters WHERE id = %s",
+                        (newsletter_id,),
+                    )
                     row = cur.fetchone()
                 conn.close()
                 if not row or row[0]:
                     _newsletter_extract_queue.task_done()
                     continue
-                chunks = chunk_text(body_text)
-                all_insights = []
-                for chunk in chunks:
-                    chunk_insights = extract_newsletter_insights(chunk)
-                    for ins in chunk_insights:
-                        ins["source_chunk"] = chunk[:500]
-                    all_insights.extend(chunk_insights)
-                store_newsletter_insights(newsletter_id, source, all_insights)
-                _log.info("newsletter_extracted", extra={"newsletter_id": newsletter_id, "insights": len(all_insights)})
-            except Exception as e:
-                _log.error("newsletter_extract_failed", extra={"newsletter_id": newsletter_id, "error": str(e)})
+                retry_count = int(row[1] or 0)
+                try:
+                    chunks = chunk_text(body_text)
+                    all_insights = []
+                    for chunk in chunks:
+                        chunk_insights = extract_newsletter_insights(chunk)
+                        for ins in chunk_insights:
+                            ins["source_chunk"] = chunk[:500]
+                        all_insights.extend(chunk_insights)
+                    store_newsletter_insights(newsletter_id, source, all_insights)
+                    _log.info(
+                        "newsletter_extracted",
+                        extra={"newsletter_id": newsletter_id, "insights": len(all_insights)},
+                    )
+                except Exception as e:
+                    err_str = f"{type(e).__name__}: {e!s}"
+                    new_retry = retry_count + 1
+                    if new_retry < _NEWSLETTER_MAX_RETRIES:
+                        # Bump retry counter, persist error, re-queue.
+                        try:
+                            conn2 = _db_conn()
+                            with conn2.cursor() as cur2:
+                                cur2.execute(
+                                    "UPDATE newsletters SET retry_count = %s, last_error = %s, last_error_at = now() WHERE id = %s",
+                                    (new_retry, err_str[:2000], newsletter_id),
+                                )
+                                conn2.commit()
+                            conn2.close()
+                        except Exception as upd_err:
+                            _log.warning(
+                                "newsletter_retry_update_failed",
+                                extra={"newsletter_id": newsletter_id, "error": str(upd_err)},
+                            )
+                        _log.warning(
+                            "newsletter_extract_retry",
+                            extra={
+                                "newsletter_id": newsletter_id,
+                                "attempt": new_retry,
+                                "max": _NEWSLETTER_MAX_RETRIES,
+                                "error": err_str,
+                            },
+                        )
+                        # Re-queue for another attempt.
+                        _newsletter_extract_queue.put((newsletter_id, source, body_text))
+                    else:
+                        # Dead-letter: mark processed=TRUE so it stops blocking,
+                        # but record the failure so it's visible to ops.
+                        try:
+                            conn2 = _db_conn()
+                            with conn2.cursor() as cur2:
+                                cur2.execute(
+                                    "UPDATE newsletters SET retry_count = %s, last_error = %s, last_error_at = now(), processed = TRUE WHERE id = %s",
+                                    (new_retry, err_str[:2000], newsletter_id),
+                                )
+                                conn2.commit()
+                            conn2.close()
+                        except Exception as upd_err:
+                            _log.warning(
+                                "newsletter_deadletter_update_failed",
+                                extra={"newsletter_id": newsletter_id, "error": str(upd_err)},
+                            )
+                        _log.error(
+                            "newsletter_extract_deadlettered",
+                            extra={
+                                "newsletter_id": newsletter_id,
+                                "attempts": new_retry,
+                                "error": err_str,
+                            },
+                        )
+                        _notify_slack(
+                            f":skull: Newsletter extraction dead-lettered after {new_retry} attempts\n"
+                            f"newsletter_id: {newsletter_id}\nError: {err_str[:300]}"
+                        )
             finally:
                 _newsletter_extract_queue.task_done()
         except _queue.Empty:
