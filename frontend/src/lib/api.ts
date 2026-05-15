@@ -213,7 +213,7 @@ export async function sendChatMessage(
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}/chat`, {
+  const res = await fetch(`/api/ask`, {
     method: "POST",
     headers,
     body: JSON.stringify({ message, history, context_limit: 20 }),
