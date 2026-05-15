@@ -238,6 +238,9 @@ def store_newsletter_insights(newsletter_id: str, source: str, insights: list[di
     conn = pool.getconn()
     try:
         with conn.cursor() as cur:
+            # Delete old insights for this newsletter to allow clean re-runs
+            cur.execute("DELETE FROM newsletter_insights WHERE newsletter_id = %s", (newsletter_id,))
+            
             for ins in insights:
                 cur.execute(
                     """
@@ -286,9 +289,9 @@ def ingest_email(
 
     # Upsert newsletter record
     newsletter_id, is_new = upsert_newsletter(email_id, source, author, subject, published_at, body_text)
-    if not is_new:
-        return {"email_id": email_id, "newsletter_id": newsletter_id, "is_new": False, "status": "duplicate", "insights_count": 0}
-
+    # is_new means it was either truly new or it was updated with longer body.
+    # For backfills, we want to proceed regardless if processed=False.
+    
     # Extract insights from all chunks
     all_insights: list[dict] = []
     chunks = chunk_text(body_text)
