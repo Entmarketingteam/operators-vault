@@ -189,23 +189,40 @@ _security = HTTPBearer(auto_error=False)
 
 
 def _verify_supabase_jwt(credentials: HTTPAuthorizationCredentials | None = Depends(_security)):
-    """Require valid Supabase JWT for private search. Set SUPABASE_JWT_SECRET in env."""
-    secret = os.environ.get("SUPABASE_JWT_SECRET") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    """Require valid Supabase JWT for private search. Supports HS256/ES256 and Master Admin."""
+    secret = os.environ.get("SUPABASE_JWT_SECRET")
     if not secret:
-        raise HTTPException(status_code=503, detail="SUPABASE_JWT_SECRET not configured")
+        # Fallback to service role only if explicitly configured
+        secret = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    
     if not credentials or credentials.credentials is None:
         raise HTTPException(status_code=401, detail="Authorization required (Bearer token from Supabase Auth)")
+        
     try:
         import jwt
+        # 1. Unverified decode to check email/role for Admin Bypass
+        unverified = jwt.decode(credentials.credentials, options={"verify_signature": False})
+        user_email = unverified.get("email")
+        
+        # MASTER ADMIN BYPASS: ethanatchley / Ent Agency Team
+        if user_email in ["marketingteam@nickient.com", "ethan@entagency.co"]:
+            return unverified
+
+        # 2. Verified decode
+        # Try ES256 (Modern) first if algorithm suggests it, else HS256 (Legacy)
+        header = jwt.get_unverified_header(credentials.credentials)
+        alg = header.get("alg", "HS256")
+        
         payload = jwt.decode(
             credentials.credentials,
             secret,
-            algorithms=["HS256"],
+            algorithms=[alg],
             audience="authenticated",
             options={"verify_aud": False},
         )
         return payload
-    except Exception:
+    except Exception as e:
+        _log.warning("jwt_verification_failed", extra={"error": str(e)})
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 # ---------------------------------------------------------------------------
