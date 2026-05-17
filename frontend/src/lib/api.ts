@@ -17,6 +17,7 @@ export interface Insight {
   author?: string;
   video_id?: string;
   start_time_sec?: string | number;
+  is_multimodal?: boolean;
   // Newsletter-specific
   newsletter_id?: string;
   subject?: string;
@@ -61,6 +62,7 @@ export interface Episode {
   duration_seconds?: number;
   description?: string;
   video_id?: string;
+  is_multimodal?: boolean;
 }
 
 export interface TopicGuide {
@@ -151,6 +153,7 @@ export async function getEpisodes(): Promise<Episode[]> {
     duration_seconds: r.duration_seconds as number | undefined,
     description: r.description as string | undefined,
     video_id: (r.video_id as string) || undefined,
+    is_multimodal: r.is_multimodal as boolean | undefined,
   }));
 }
 

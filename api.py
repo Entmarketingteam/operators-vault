@@ -778,7 +778,8 @@ def _search_postgres(
                        ts_rank(fts, websearch_to_tsquery('english', %s)) AS rank,
                        title AS headline_title,
                        ts_headline('english', description, websearch_to_tsquery('english', %s),
-                           'MaxFragments=1,MaxWords=20,MinWords=5') AS headline_description
+                           'MaxFragments=1,MaxWords=20,MinWords=5') AS headline_description,
+                       (SELECT EXISTS (SELECT 1 FROM visual_moments vm WHERE vm.video_id = insights.video_id)) as is_multimodal
                 FROM insights
                 WHERE {" AND ".join(where_clauses)}
                 ORDER BY rank DESC
@@ -800,6 +801,7 @@ def _search_postgres(
                     "rank": float(row[8]) if row[8] is not None else 0,
                     "headline_title": row[9],
                     "headline_description": row[10],
+                    "is_multimodal": row[11],
                 })
         finally:
             cur.close()
@@ -972,6 +974,10 @@ def _list_episodes(podcast: str | None = None, limit: int = 100) -> dict:
     conn = psycopg2.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
+        # Detect which videos have visual moments (multimodal)
+        cur.execute("SELECT DISTINCT video_id FROM visual_moments")
+        multimodal_ids = {r[0] for r in cur.fetchall()}
+
         if podcast:
             cur.execute(
                 """
@@ -1003,6 +1009,7 @@ def _list_episodes(podcast: str | None = None, limit: int = 100) -> dict:
                 "thumbnail_url": r[5],
                 "description": r[6],
                 "published_at": r[4].isoformat() if r[4] else None,
+                "is_multimodal": r[0] in multimodal_ids,
             }
             for r in rows
         ]

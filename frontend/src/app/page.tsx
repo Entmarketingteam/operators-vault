@@ -223,6 +223,11 @@ function SpotlightCard({ insight, label, onExpand }: { insight: Insight; label: 
           <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border ${c.badge}`}>
             {insight.category?.replace("and", "&")}
           </span>
+          {insight.is_multimodal && (
+            <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 animate-pulse">
+              <Monitor className="h-2.5 w-2.5" /> Multimodal
+            </span>
+          )}
         </div>
         <h2 className="text-lg font-bold leading-snug mb-3 group-hover:text-indigo-200 transition-colors">
           {insight.title?.replace(/\*\*/g, "")}
@@ -510,6 +515,11 @@ function InsightRow({ insight, onExpand }: { insight: Insight; onExpand: (i: Ins
           {insight.category && (
             <span className={`text-[11px] px-1.5 py-0.5 rounded border ${c.badge}`}>
               {insight.category.replace("and", "&").replace("perspectives","").replace("exercises","").replace("case studies","")}
+            </span>
+          )}
+          {insight.is_multimodal && (
+            <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 animate-pulse">
+              <Monitor className="h-2 w-2" /> Multi
             </span>
           )}
         </div>
