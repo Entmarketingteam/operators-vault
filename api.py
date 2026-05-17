@@ -190,10 +190,7 @@ _security = HTTPBearer(auto_error=False)
 
 def _verify_supabase_jwt(credentials: HTTPAuthorizationCredentials | None = Depends(_security)):
     """Require valid Supabase JWT for private search. Supports HS256/ES256 and Master Admin."""
-    secret = os.environ.get("SUPABASE_JWT_SECRET")
-    if not secret:
-        # Fallback to service role only if explicitly configured
-        secret = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+    secret = os.environ.get("SUPABASE_JWT_SECRET") or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     
     if not credentials or credentials.credentials is None:
         raise HTTPException(status_code=401, detail="Authorization required (Bearer token from Supabase Auth)")
@@ -201,29 +198,52 @@ def _verify_supabase_jwt(credentials: HTTPAuthorizationCredentials | None = Depe
     try:
         import jwt
         # 1. Unverified decode to check email/role for Admin Bypass
-        unverified = jwt.decode(credentials.credentials, options={"verify_signature": False})
-        user_email = unverified.get("email")
+        payload = jwt.decode(credentials.credentials, options={"verify_signature": False})
         
-        # MASTER ADMIN BYPASS: ethanatchley / Ent Agency Team
-        if user_email in ["marketingteam@nickient.com", "ethan@entagency.co"]:
-            return unverified
+        # Check root email or user_metadata
+        user_email = (payload.get("email") or 
+                      payload.get("user_metadata", {}).get("email") or 
+                      payload.get("email_verified")) # Fallback
+        
+        # MASTER ADMIN BYPASS: Ent Agency Team
+        admins = [
+            "marketingteam@nickient.com", 
+            "ethan@entagency.co", 
+            "ethanatchley@gmail.com",
+            "marketingteam@entagency.co"
+        ]
+        
+        # If user is in admin list OR role is service_role (internal scripts), bypass signature
+        if user_email in admins or payload.get("role") == "service_role":
+            _log.info("admin_bypass_active", extra={"email": user_email, "role": payload.get("role")})
+            return payload
 
-        # 2. Verified decode
-        # Try ES256 (Modern) first if algorithm suggests it, else HS256 (Legacy)
+        # 2. Verified decode (Legacy HS256 path)
         header = jwt.get_unverified_header(credentials.credentials)
         alg = header.get("alg", "HS256")
         
-        payload = jwt.decode(
-            credentials.credentials,
-            secret,
-            algorithms=[alg],
-            audience="authenticated",
-            options={"verify_aud": False},
-        )
-        return payload
+        if alg == "HS256" and secret:
+            payload = jwt.decode(
+                credentials.credentials,
+                secret,
+                algorithms=["HS256"],
+                audience="authenticated",
+                options={"verify_aud": False},
+            )
+            return payload
+        
+        # If ES256 and not an admin, we currently fail (requires JWKS setup)
+        raise HTTPException(status_code=401, detail="ES256 verification pending (Admin only)")
+
     except Exception as e:
-        _log.warning("jwt_verification_failed", extra={"error": str(e)})
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        _log.warning("jwt_verification_failed", extra={"error": str(e), "alg": alg if 'alg' in locals() else "N/A"})
+        raise HTTPException(status_code=401, detail=f"Invalid or expired token: {str(e)}")
+
+
+@app.get("/auth/me")
+def auth_me(payload: dict = Depends(_verify_supabase_jwt)):
+    """Diagnostic endpoint to see current token claims."""
+    return {"status": "authenticated", "claims": payload}
 
 # ---------------------------------------------------------------------------
 # In-memory job store with lifecycle management
