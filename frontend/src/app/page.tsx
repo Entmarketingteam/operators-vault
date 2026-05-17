@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase, signInWithGoogle } from "@/lib/supabase";
 import { 
   searchInsights, 
   getNewsletterDetail, 
