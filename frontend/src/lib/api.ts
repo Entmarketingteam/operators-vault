@@ -104,7 +104,8 @@ export async function searchInsights(query: string, token?: string, podcast?: st
 
   if (newsletterRes?.ok) {
     const data = await newsletterRes.json();
-    const items = Array.isArray(data) ? data : data.results || data.insights || [];
+    // Newsletter API uses "insights"
+    const items = Array.isArray(data) ? data : data.results || data.insights || data.hits || [];
     results = [...results, ...items];
   }
 
@@ -117,7 +118,8 @@ export async function searchInsights(query: string, token?: string, podcast?: st
 
     if (videoRes?.ok) {
       const data = await videoRes.json();
-      const items = Array.isArray(data) ? data : data.results || data.insights || [];
+      // Search API uses "hits"
+      const items = Array.isArray(data) ? data : data.hits || data.results || data.insights || [];
       results = [...results, ...items];
     }
   }
