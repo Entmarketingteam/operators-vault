@@ -2,7 +2,14 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-import { searchInsights, getNewsletterDetail, type Insight, type NewsletterDetail } from "@/lib/api";
+import { 
+  searchInsights, 
+  getNewsletterDetail, 
+  getVisualMoments,
+  type Insight, 
+  type NewsletterDetail,
+  type VisualMoment
+} from "@/lib/api";
 import {
   Search, Loader2, Sparkles, BookOpen, Users, Lightbulb,
   Quote, BookMarked, MessageSquare, Layers, Play, Mail,
@@ -244,7 +251,7 @@ function SpotlightCard({ insight, label, onExpand }: { insight: Insight; label: 
 
 // ─── Insight Detail Modal ─────────────────────────────────────────────────
 
-function InsightModal({ insight, onClose }: { insight: Insight; onClose: () => void }) {
+function InsightModal({ insight, onClose, session }: { insight: Insight; onClose: () => void; session: Session | null }) {
   const speaker = insight.speaker_name || insight.speaker;
   const source = insight.podcast ? getPodcastShortName(insight.podcast) : (insight.author || insight.source || "");
   const colorKey = getCategoryColor(insight.category);
@@ -258,6 +265,9 @@ function InsightModal({ insight, onClose }: { insight: Insight; onClose: () => v
   const [newsletter, setNewsletter] = useState<NewsletterDetail | null>(null);
   const [loadingNewsletter, setLoadingNewsletter] = useState(false);
   const [showFullText, setShowFullText] = useState(false);
+  
+  const [visualMoments, setVisualMoments] = useState<VisualMoment[]>([]);
+  const [loadingMoments, setLoadingMoments] = useState(false);
 
   // Load full newsletter when it's a newsletter insight with a newsletter_id
   useEffect(() => {
@@ -269,6 +279,17 @@ function InsightModal({ insight, onClose }: { insight: Insight; onClose: () => v
       });
     }
   }, [insight.newsletter_id, isNewsletter]);
+
+  // Load visual moments for videos
+  useEffect(() => {
+    if (isVideo && insight.video_id && session?.access_token) {
+      setLoadingMoments(true);
+      getVisualMoments(insight.video_id, session.access_token).then(moments => {
+        setVisualMoments(moments);
+        setLoadingMoments(false);
+      });
+    }
+  }, [insight.video_id, isVideo, session?.access_token]);
 
   // Close on Escape
   useEffect(() => {
@@ -338,6 +359,41 @@ function InsightModal({ insight, onClose }: { insight: Insight; onClose: () => v
             <p className="text-sm text-[var(--muted-foreground)] leading-relaxed whitespace-pre-wrap">
               {insight.description}
             </p>
+          )}
+
+          {/* ── Visual Timeline (Multimodal Data) ── */}
+          {isVideo && (visualMoments.length > 0 || loadingMoments) && (
+            <div className="mt-6 space-y-4">
+              <div className="flex items-center gap-2">
+                <div className="h-px flex-1 bg-[var(--border)]" />
+                <span className="text-[11px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] whitespace-nowrap flex items-center gap-1.5">
+                  <Monitor className="h-3 w-3" /> Visual Timeline
+                </span>
+                <div className="h-px flex-1 bg-[var(--border)]" />
+              </div>
+              
+              {loadingMoments ? (
+                <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+                  <Loader2 className="h-3 w-3 animate-spin" /> Analyzing video timeline…
+                </div>
+              ) : (
+                <div className="space-y-3 relative pl-4 border-l border-[var(--border)] ml-2">
+                  {visualMoments.map((m, idx) => (
+                    <div key={m.id} className="relative group">
+                      <div className={`absolute -left-[21px] top-1.5 h-2 w-2 rounded-full border-2 border-[var(--card)] bg-indigo-500`} />
+                      <div className="flex items-start gap-3">
+                        <span className="text-[10px] font-mono font-bold text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded shrink-0">
+                          {Math.floor(m.start_time_sec / 60)}:{(m.start_time_sec % 60).toString().padStart(2, '0')}
+                        </span>
+                        <p className="text-xs text-[var(--muted-foreground)] leading-tight group-hover:text-[var(--foreground)] transition-colors pt-0.5">
+                          {m.description}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           {/* ── Newsletter extras ── */}
@@ -886,7 +942,7 @@ export default function HomePage() {
 
       {/* Insight detail modal */}
       {selectedInsight && (
-        <InsightModal insight={selectedInsight} onClose={() => setSelectedInsight(null)} />
+        <InsightModal insight={selectedInsight} session={session} onClose={() => setSelectedInsight(null)} />
       )}
     </div>
   );

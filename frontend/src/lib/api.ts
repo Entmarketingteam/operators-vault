@@ -75,6 +75,14 @@ export interface ChatMessage {
   sources?: Insight[];
 }
 
+export interface VisualMoment {
+  id: string;
+  start_time_sec: number;
+  end_time_sec: number;
+  description: string;
+  transcript_excerpt?: string;
+}
+
 export async function searchInsights(query: string, token?: string, podcast?: string, limit = 100): Promise<Insight[]> {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
@@ -193,6 +201,16 @@ export async function getNewsletterDetail(newsletterId: string): Promise<Newslet
   const res = await fetch(`${API_BASE}/newsletters/${newsletterId}`).catch(() => null);
   if (!res?.ok) return null;
   return res.json();
+}
+
+export async function getVisualMoments(videoId: string, token: string): Promise<VisualMoment[]> {
+  const headers: Record<string, string> = {};
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  
+  const res = await fetch(`${API_BASE}/visual-moments?video_id=${videoId}`, { headers }).catch(() => null);
+  if (!res?.ok) return [];
+  const data = await res.json();
+  return data.moments || [];
 }
 
 export async function generateTopicGuide(topic: string): Promise<TopicGuide> {

@@ -1426,6 +1426,76 @@ def insights_list(
     return _list_insights(category=category, podcast=podcast, limit=limit)
 
 
+@app.get("/visual-moments")
+def get_visual_moments(
+    video_id: str,
+    _: dict = Depends(_verify_supabase_jwt),
+):
+    """List visual moments for a specific video. Requires Bearer token."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        return {"moments": []}
+    conn = psycopg2.connect(db_url)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id, start_time_sec, end_time_sec, description, transcript_excerpt FROM visual_moments WHERE video_id = %s ORDER BY start_time_sec",
+            (video_id,),
+        )
+        rows = cur.fetchall()
+        return {
+            "moments": [
+                {
+                    "id": str(r[0]),
+                    "start_time_sec": float(r[1]) if r[1] is not None else None,
+                    "end_time_sec": float(r[2]) if r[2] is not None else None,
+                    "description": r[3],
+                    "transcript_excerpt": r[4],
+                }
+                for r in rows
+            ]
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.get("/visual-moments")
+def get_visual_moments(
+    video_id: str,
+    _: dict = Depends(_verify_supabase_jwt),
+):
+    """List visual moments for a specific video. Requires Bearer token."""
+    import psycopg2
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        return {"moments": []}
+    conn = psycopg2.connect(db_url)
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT id, start_time_sec, end_time_sec, description, transcript_excerpt FROM visual_moments WHERE video_id = %s ORDER BY start_time_sec",
+            (video_id,),
+        )
+        rows = cur.fetchall()
+        return {
+            "moments": [
+                {
+                    "id": str(r[0]),
+                    "start_time_sec": float(r[1]) if r[1] is not None else None,
+                    "end_time_sec": float(r[2]) if r[2] is not None else None,
+                    "description": r[3],
+                    "transcript_excerpt": r[4],
+                }
+                for r in rows
+            ]
+        }
+    finally:
+        cur.close()
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Speaker Profiles (public — no JWT required)
 # ---------------------------------------------------------------------------

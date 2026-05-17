@@ -120,7 +120,11 @@ def run_backfill(limit: int = 5, only_gaps: bool = True):
         vid = target["video_id"]
         pod = target["podcast"]
         _log.info(f"[{i+1}/{limit}] Processing {vid} ({pod})...")
-        backfill_video(vid, pod)
+        try:
+            backfill_video(vid, pod)
+        except Exception as e:
+            _log.error(f"FAILED to process video {vid}: {e}")
+            continue
 
 if __name__ == "__main__":
     import argparse
