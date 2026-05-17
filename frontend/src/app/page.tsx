@@ -570,7 +570,7 @@ export default function HomePage() {
   ) => {
     setLoading(true);
     try {
-      const podcast = src === "newsletters" ? "" : src.replace("_", "");
+      const podcast = src === "newsletters" ? "" : src;
       const searchQ = q || "DTC ecommerce brand growth marketing operator";
       let data = await searchInsights(searchQ, token, podcast);
       if (src === "newsletters") {
@@ -593,8 +593,8 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!sessionLoaded) return;
-    doSearch("", "", "", session?.access_token);
-  }, [sessionLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+    doSearch(query, source, typeFilter, session?.access_token);
+  }, [sessionLoaded, session?.access_token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keyboard shortcut: / focuses search
   useEffect(() => {
