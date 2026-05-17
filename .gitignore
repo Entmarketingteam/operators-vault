@@ -10,6 +10,7 @@ dist/
 build/
 *.log
 .DS_Store
+*.mp4
 
 # Downloaded wheels (install via scripts/install_wheels.ps1 or pip)
 wheels/
