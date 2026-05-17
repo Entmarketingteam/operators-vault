@@ -570,10 +570,9 @@ export default function HomePage() {
   ) => {
     setLoading(true);
     try {
-      const podcast = src === "newsletters" ? "" : src;
+      const podcast = src === "newsletters" ? "" : src.replace("_", "");
       const searchQ = q || "DTC ecommerce brand growth marketing operator";
       let data = await searchInsights(searchQ, token, podcast);
-
       if (src === "newsletters") {
         data = data.filter(i => !i.podcast && (i.author || i.source));
       }
