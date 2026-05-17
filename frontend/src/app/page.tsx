@@ -136,7 +136,7 @@ function InsightModal({ insight, onClose, session }: { insight: Insight; onClose
   const isVideo = !!insight.video_id;
   const startSec = Math.floor(Number(insight.start_time_sec ?? 0));
   const youtubeUrl = isVideo
-    ? `https://youtube.com/watch?v=${insight.video_id}&t=${startSec}`
+    ? `https://youtube.com/watch?v=${insight.video_id}&t=${startSec}s`
     : undefined;
   const isNewsletter = !insight.podcast && (insight.author || insight.source);
 
@@ -266,7 +266,7 @@ function InsightModal({ insight, onClose, session }: { insight: Insight; onClose
                       <div className={`absolute -left-[21px] top-1.5 h-2 w-2 rounded-full border-2 border-[var(--card)] bg-indigo-500`} />
                       <div className="flex items-start gap-3">
                         <a 
-                          href={`https://youtube.com/watch?v=${insight.video_id}&t=${Math.floor(m.start_time_sec)}`}
+                          href={`https://youtube.com/watch?v=${insight.video_id}&t=${Math.floor(m.start_time_sec)}s`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-[10px] font-mono font-bold text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded shrink-0 hover:bg-indigo-500/20 transition-colors"

@@ -53,7 +53,7 @@ function SpeakerInsightModal({ insight, onClose }: { insight: Insight; onClose: 
   const isNewsletter = !insight.podcast && (insight.author || insight.source);
   const isVideo = !!insight.video_id;
   const youtubeUrl = isVideo
-    ? `https://youtube.com/watch?v=${insight.video_id}&t=${Math.floor(Number(insight.start_time_sec ?? 0))}`
+    ? `https://youtube.com/watch?v=${insight.video_id}&t=${Math.floor(Number(insight.start_time_sec ?? 0))}s`
     : undefined;
 
   const [newsletter, setNewsletter] = useState<NewsletterDetail | null>(null);
