@@ -187,7 +187,8 @@ export default function EpisodesPage() {
   const podcasts = Array.from(new Set(episodes.map(e => e.podcast).filter(Boolean)));
 
   const filtered = episodes.filter((e) => {
-    const matchSearch = !search || e.title.toLowerCase().includes(search.toLowerCase()) ||
+    const matchSearch = !search || 
+      (e.title || "").toLowerCase().includes(search.toLowerCase()) ||
       (e.description || "").toLowerCase().includes(search.toLowerCase());
     const matchPodcast = !podcastFilter || e.podcast === podcastFilter;
     return matchSearch && matchPodcast;

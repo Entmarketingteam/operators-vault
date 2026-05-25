@@ -45,7 +45,7 @@ function InsightCard({ insight }: { insight: NewsletterInsight }) {
           <div className="flex flex-wrap items-center gap-2 mb-1.5">
             <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full border ${color.bg} ${color.text} ${color.border}`}>
               <Mail className="h-3 w-3" />
-              {insight.author}
+              {insight.author || "Operator"}
             </span>
             {insight.category && (
               <span className={`text-xs px-2 py-0.5 rounded-full border ${categoryColor(insight.category)}`}>
@@ -55,7 +55,7 @@ function InsightCard({ insight }: { insight: NewsletterInsight }) {
           </div>
 
           <h3 className="text-sm font-semibold leading-snug mb-1 hover:text-indigo-300 transition-colors">
-            {insight.title.replace(/\*\*/g, "")}
+            {(insight.title || "").replace(/\*\*/g, "")}
           </h3>
 
           {!expanded && (
@@ -107,9 +107,9 @@ export default function NewslettersPage() {
   const filtered = insights.filter((ins) => {
     const matchSource = !activeSource || ins.source === activeSource;
     const matchSearch = !search ||
-      ins.title.toLowerCase().includes(search.toLowerCase()) ||
-      ins.description.toLowerCase().includes(search.toLowerCase()) ||
-      ins.author.toLowerCase().includes(search.toLowerCase());
+      (ins.title || "").toLowerCase().includes(search.toLowerCase()) ||
+      (ins.description || "").toLowerCase().includes(search.toLowerCase()) ||
+      (ins.author || "").toLowerCase().includes(search.toLowerCase());
     return matchSource && matchSearch;
   });
 

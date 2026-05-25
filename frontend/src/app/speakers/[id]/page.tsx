@@ -89,7 +89,7 @@ function SpeakerInsightModal({ insight, onClose }: { insight: Insight; onClose: 
             </span>
             {insight.category && (
               <span className={`text-[11px] px-1.5 py-0.5 rounded border ${c.badge}`}>
-                {insight.category.replace("and", "&")}
+                {insight.category?.replace("and", "&")}
               </span>
             )}
           </div>
@@ -296,7 +296,7 @@ export default function SpeakerDetailPage() {
                     </span>
                     {insight.category && (
                       <span className={`text-[10px] px-1.5 py-0.5 rounded border ${c.badge}`}>
-                        {insight.category.replace("and", "&").replace("perspectives","").replace("exercises","")}
+                        {insight.category?.replace("and", "&").replace("perspectives","").replace("exercises","")}
                       </span>
                     )}
                   </div>

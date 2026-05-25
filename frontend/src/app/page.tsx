@@ -211,7 +211,7 @@ function InsightModal({ insight, onClose, session }: { insight: Insight; onClose
             </span>
             {insight.category && (
               <span className={`text-[11px] px-1.5 py-0.5 rounded border ${c.badge}`}>
-                {insight.category.replace("and", "&").replace("perspectives","").replace("exercises","").replace("case studies","")}
+                {insight.category?.replace("and", "&").replace("perspectives","").replace("exercises","").replace("case studies","")}
               </span>
             )}
             {speaker && <span className={`text-[11px] font-medium ${c.text}`}>{speaker}</span>}
@@ -397,7 +397,7 @@ function InsightRow({ insight, onExpand }: { insight: Insight; onExpand: (i: Ins
           </span>
           {insight.category && (
             <span className={`text-[11px] px-1.5 py-0.5 rounded border ${c.badge}`}>
-              {insight.category.replace("and", "&").replace("perspectives","").replace("exercises","").replace("case studies","")}
+              {insight.category?.replace("and", "&").replace("perspectives","").replace("exercises","").replace("case studies","")}
             </span>
           )}
           {insight.is_multimodal && (
@@ -477,7 +477,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!sessionLoaded) return;
     doSearch(query, source, typeFilter, session?.access_token);
-  }, [sessionLoaded, session?.access_token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sessionLoaded, session?.access_token, source, typeFilter]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keyboard shortcut: / focuses search
   useEffect(() => {
@@ -499,7 +499,9 @@ export default function HomePage() {
   const handleTopicClick = (topicQuery: string) => {
     setQuery(topicQuery);
     setActiveTopic(topicQuery);
-    doSearch(topicQuery, source, typeFilter, session?.access_token);
+    setSource("");
+    setTypeFilter("");
+    doSearch(topicQuery, "", "", session?.access_token);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -536,16 +538,16 @@ export default function HomePage() {
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] mb-2 px-2">Unit Economics & True Metrics</div>
           <div className="space-y-0.5">
             {[
-              { label: "MER",                  query: "marketing efficiency ratio contribution margin", icon: Activity,     color: "violet"  },
-              { label: "nCAC / Blended CAC",    query: "new customer acquisition cost blended cac",     icon: Target,       color: "emerald" },
-              { label: "LTV:nCAC Ratio",       query: "lifetime value customer acquisition cost",      icon: BarChart2,    color: "rose"    },
-              { label: "Net Profit",           query: "net profit bottom line profitability",          icon: DollarSign,   color: "green"   },
-              { label: "Contribution Margin",  query: "contribution margin unit economics",            icon: PieChart,     color: "blue"    },
-              { label: "Payback Period",       query: "payback period customer return",                icon: Clock,        color: "amber"   },
-              { label: "Incrementality",       query: "incrementality test holdout lift",              icon: Zap,          color: "sky"     },
-              { label: "ROAS vs Real Metrics", query: "roas vs contribution margin efficiency",        icon: AlertTriangle,color: "rose"    },
-              { label: "Cash Conversion Cycle", query: "cash conversion inventory working capital",      icon: RefreshCw,    color: "teal"    },
-              { label: "Revenue Quality",       query: "revenue quality recurring repeat",               icon: TrendingUp,   color: "green"   },
+              { label: "MER",                  query: 'MER OR "marketing efficiency ratio"',           icon: Activity,     color: "violet"  },
+              { label: "nCAC / Blended CAC",    query: 'nCAC OR "blended CAC" OR "acquisition cost"',   icon: Target,       color: "emerald" },
+              { label: "LTV:nCAC Ratio",       query: 'LTV OR nCAC OR "customer value"',               icon: BarChart2,    color: "rose"    },
+              { label: "Net Profit",           query: '"net profit" OR profitability',                 icon: DollarSign,   color: "green"   },
+              { label: "Contribution Margin",  query: '"contribution margin" OR "unit economics"',     icon: PieChart,     color: "blue"    },
+              { label: "Payback Period",       query: '"payback period" OR "customer return"',         icon: Clock,        color: "amber"   },
+              { label: "Incrementality",       query: 'incrementality OR "holdout test"',              icon: Zap,          color: "sky"     },
+              { label: "ROAS vs Real Metrics", query: 'ROAS OR "real metrics" OR efficiency',          icon: AlertTriangle,color: "rose"    },
+              { label: "Cash Conversion Cycle", query: '"cash conversion" OR "inventory" OR capital',   icon: RefreshCw,    color: "teal"    },
+              { label: "Revenue Quality",       query: '"revenue quality" OR recurring OR repeat',      icon: TrendingUp,   color: "green"   },
             ].map(item => (
               <button
                 key={item.label}
@@ -564,15 +566,15 @@ export default function HomePage() {
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] mb-2 px-2">Email & SMS</div>
           <div className="space-y-0.5">
             {[
-              { label: "Email Marketing",      query: "email marketing klaviyo retention",             icon: Mail,         color: "violet"  },
-              { label: "Welcome Flow",         query: "welcome flow automation series",                icon: Inbox,        color: "emerald" },
-              { label: "Abandoned Cart",       query: "abandoned cart recovery conversion",            icon: ShoppingCart, color: "rose"    },
-              { label: "Win-Back / Re-engage", query: "winback re-engagement churn",                   icon: RefreshCw,    color: "blue"    },
-              { label: "Email Segmentation",   query: "email segmentation personalization list",       icon: Users,        color: "teal"    },
-              { label: "Email Deliverability", query: "email deliverability inbox placement sendgrid",  icon: Megaphone,    color: "sky"     },
-              { label: "SMS Marketing",        query: "sms marketing postscript attentive",            icon: MessageSquare,color: "amber"   },
-              { label: "Klaviyo / ESP Setup",  query: "klaviyo esp configuration setup",               icon: Wrench,       color: "slate"   },
-              { label: "Send Cadence & Timing", query: "send cadence frequency timing optimize",        icon: Clock,        color: "yellow"  },
+              { label: "Email Marketing",      query: 'Email OR Klaviyo OR newsletter',                icon: Mail,         color: "violet"  },
+              { label: "Welcome Flow",         query: '"welcome flow" OR automation OR sequence',      icon: Inbox,        color: "emerald" },
+              { label: "Abandoned Cart",       query: '"abandoned cart" OR recovery',                  icon: ShoppingCart, color: "rose"    },
+              { label: "Win-Back / Re-engage", query: 'winback OR re-engagement OR "churn prevention"', icon: RefreshCw,    color: "blue"    },
+              { label: "Email Segmentation",   query: 'segmentation OR "list hygiene"',                icon: Users,        color: "teal"    },
+              { label: "Email Deliverability", query: 'deliverability OR "inbox placement"',           icon: Megaphone,    color: "sky"     },
+              { label: "SMS Marketing",        query: 'SMS OR Attentive OR Postscript',                icon: MessageSquare,color: "amber"   },
+              { label: "Klaviyo / ESP Setup",  query: 'Klaviyo OR "ESP configuration"',                icon: Wrench,       color: "slate"   },
+              { label: "Send Cadence & Timing", query: '"send cadence" OR "timing" OR frequency',        icon: Clock,        color: "yellow"  },
             ].map(item => (
               <button
                 key={item.label}
@@ -591,10 +593,10 @@ export default function HomePage() {
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] mb-2 px-2">Retention & Subscription</div>
           <div className="space-y-0.5">
             {[
-              { label: "Retention Strategy",   query: "retention strategy customer journey",           icon: RefreshCw,    color: "violet"  },
-              { label: "Subscription Models",  query: "subscription recurring revenue membership",     icon: CreditCard,   color: "emerald" },
-              { label: "Churn Prevention",     query: "churn reduction retention metrics",              icon: TrendingDown, color: "rose"    },
-              { label: "Post-Purchase Upsell", query: "post purchase upsell aov expansion",            icon: ShoppingCart, color: "blue"    },
+              { label: "Retention Strategy",   query: 'retention OR "customer journey" OR LTV',        icon: RefreshCw,    color: "violet"  },
+              { label: "Subscription Models",  query: 'subscription OR "recurring revenue"',           icon: CreditCard,   color: "emerald" },
+              { label: "Churn Prevention",     query: 'churn OR "winback" OR retention',               icon: TrendingDown, color: "rose"    },
+              { label: "Post-Purchase Upsell", query: '"post purchase" OR "upsell" OR AOV',            icon: ShoppingCart, color: "blue"    },
             ].map(item => (
               <button
                 key={item.label}

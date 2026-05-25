@@ -88,43 +88,68 @@ export interface VisualMoment {
 export async function searchInsights(query: string, token?: string, podcast?: string, limit = 100): Promise<Insight[]> {
   const params = new URLSearchParams();
   if (query) params.set("q", query);
-  if (podcast) params.set("podcast", podcast);
+  if (podcast && podcast !== "newsletters") params.set("podcast", podcast);
+  if (podcast === "newsletters") params.set("type", "newsletters");
   params.set("limit", String(limit));
 
   const headers: Record<string, string> = {};
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  // Newsletter insights (public)
-  const newsletterRes = await fetch(
-    `${API_BASE}/newsletter-insights?${params}`,
+  let results: Insight[] = [];
+
+  // Try the unified search endpoint first (now public for insights)
+  const searchRes = await fetch(
+    `${API_BASE}/search?${params}`,
     { headers }
   ).catch(() => null);
 
-  let results: Insight[] = [];
-
-  if (newsletterRes?.ok) {
-    const data = await newsletterRes.json();
-    // Newsletter API uses "insights"
-    const items = Array.isArray(data) ? data : data.results || data.insights || data.hits || [];
-    results = [...results, ...items];
+  if (searchRes?.ok) {
+    const data = await searchRes.json();
+    const items = Array.isArray(data) ? data : data.hits || data.results || data.insights || [];
+    results = items.filter(Boolean); // Safety filter
   }
 
-  // Video insights (authenticated)
-  if (token) {
-    const videoRes = await fetch(
-      `${API_BASE}/search?${params}`,
+  // Fallback/Secondary: Newsletter insights (public)
+  // We only call this if we specifically asked for newsletters OR if the unified search returned nothing
+  if (results.length === 0 || podcast === "newsletters") {
+    const nlParams = new URLSearchParams();
+    if (query) nlParams.set("q", query);
+    if (podcast && podcast !== "newsletters") nlParams.set("source", podcast);
+    nlParams.set("limit", String(limit));
+
+    const newsletterRes = await fetch(
+      `${API_BASE}/newsletter-insights?${nlParams}`,
       { headers }
     ).catch(() => null);
 
-    if (videoRes?.ok) {
-      const data = await videoRes.json();
-      // Search API uses "hits"
-      const items = Array.isArray(data) ? data : data.hits || data.results || data.insights || [];
-      results = [...results, ...items];
+    if (newsletterRes?.ok) {
+      const data = await newsletterRes.json();
+      const items = Array.isArray(data) ? data : data.results || data.insights || data.hits || [];
+      
+      // Combine and deduplicate
+      const existingIds = new Set(results.map(r => r.id));
+      for (const item of items) {
+        if (item && !existingIds.has(item.id)) {
+          results.push(item);
+        }
+      }
     }
   }
 
-  return results;
+  // Final sort by rank (if available) or publication date
+  return results.sort((a, b) => {
+    const rankA = Number((a as any).rank ?? a.score ?? 0);
+    const rankB = Number((b as any).rank ?? b.score ?? 0);
+    if (rankA !== rankB) return rankB - rankA;
+    
+    // Fallback to date (safer parsing)
+    const getTime = (d?: string) => {
+      if (!d) return 0;
+      const t = new Date(d).getTime();
+      return isNaN(t) ? 0 : t;
+    };
+    return getTime(b.published_at) - getTime(a.published_at);
+  });
 }
 
 export async function getSpeakers(): Promise<Speaker[]> {

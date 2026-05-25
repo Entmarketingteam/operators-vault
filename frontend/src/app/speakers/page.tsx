@@ -128,20 +128,20 @@ export default function SpeakersPage() {
 
   const filteredGuests = guests.filter((s) =>
     !search ||
-    s.name.toLowerCase().includes(search.toLowerCase()) ||
-    s.company?.toLowerCase().includes(search.toLowerCase())
+    (s.name || "").toLowerCase().includes(search.toLowerCase()) ||
+    (s.company || "").toLowerCase().includes(search.toLowerCase())
   );
 
   const filteredHosts9 = hosts9.filter((s) =>
     !search ||
-    s.name.toLowerCase().includes(search.toLowerCase()) ||
-    s.company?.toLowerCase().includes(search.toLowerCase())
+    (s.name || "").toLowerCase().includes(search.toLowerCase()) ||
+    (s.company || "").toLowerCase().includes(search.toLowerCase())
   );
 
   const filteredHostsMarketing = hostsMarketing.filter((s) =>
     !search ||
-    s.name.toLowerCase().includes(search.toLowerCase()) ||
-    s.company?.toLowerCase().includes(search.toLowerCase())
+    (s.name || "").toLowerCase().includes(search.toLowerCase()) ||
+    (s.company || "").toLowerCase().includes(search.toLowerCase())
   );
 
   const showHosts = !search || filteredHosts9.length > 0 || filteredHostsMarketing.length > 0;

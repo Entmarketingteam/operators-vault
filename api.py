@@ -240,6 +240,16 @@ def _verify_supabase_jwt(credentials: HTTPAuthorizationCredentials | None = Depe
         raise HTTPException(status_code=401, detail=f"Invalid or expired token: {str(e)}")
 
 
+def _get_current_user_optional(credentials: HTTPAuthorizationCredentials | None = Depends(_security)):
+    """Optional JWT verification — returns payload or None. Does not raise 401 if missing."""
+    if not credentials or not credentials.credentials:
+        return None
+    try:
+        return _verify_supabase_jwt(credentials)
+    except Exception:
+        return None
+
+
 @app.get("/auth/me")
 def auth_me(payload: dict = Depends(_verify_supabase_jwt)):
     """Diagnostic endpoint to see current token claims."""
@@ -758,6 +768,73 @@ def health():
     }
 
 
+# ---------------------------------------------------------------------------
+# Database Connection Pooling
+# ---------------------------------------------------------------------------
+_db_pool = None
+
+
+def _get_db_url():
+    """Get DB URL and force port 6543 for Supabase pooler (Transaction Mode)."""
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        return None
+    if "pooler.supabase.com" in url and ":5432" in url:
+        # Port 5432 is Session mode (limited to 15-20); 6543 is Transaction mode (thousands)
+        url = url.replace(":5432", ":6543")
+    return url
+
+
+def _get_db_conn():
+    """Get a connection from the global pool."""
+    global _db_pool
+    url = _get_db_url()
+    if not url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    if _db_pool is None:
+        try:
+            import psycopg2.pool
+            # min 2, max 20 connections
+            _db_pool = psycopg2.pool.ThreadedConnectionPool(2, 20, url)
+        except Exception as e:
+            _log.error("db_pool_init_failed", extra={"error": str(e)})
+            raise HTTPException(status_code=500, detail="Database pool initialization failed")
+    try:
+        return _db_pool.getconn()
+    except Exception as e:
+        _log.error("db_get_conn_failed", extra={"error": str(e)})
+        raise HTTPException(status_code=503, detail="Database connection limit reached")
+
+
+def _release_db_conn(conn):
+    """Release a connection back to the pool."""
+    if _db_pool and conn:
+        _db_pool.putconn(conn)
+
+
+# ---------------------------------------------------------------------------
+# Search Helpers
+# ---------------------------------------------------------------------------
+
+_STOP = frozenset(["how", "do", "does", "what", "why", "when", "where", "who",
+                   "can", "should", "would", "could", "are", "is", "the", "a",
+                   "an", "to", "for", "of", "in", "on", "at", "about", "with",
+                   "and", "or", "but", "not", "if", "then", "i", "we", "you",
+                   "they", "my", "your", "their", "say", "says", "approach",
+                   "tell", "think", "use", "some", "most", "more", "best",
+                   "good", "get", "into", "from", "by"])
+
+
+def _extract_keywords(q: str) -> str:
+    """Extract keywords from a conversational query for broader FTS matching (OR-joined)."""
+    import re as _re
+    # Strip punctuation (keep letters/digits/spaces), lowercase, split
+    words = _re.sub(r"[^\w\s]", " ", q.lower()).split()
+    # Remove stop words, short words, and tokens containing digits (e.g. "8")
+    kw = [w for w in words if w not in _STOP and len(w) > 2 and not any(c.isdigit() for c in w)]
+    return " OR ".join(kw[:6])  # OR-joined for maximum recall in fallback
+
+
 def _search_postgres(
     q: str,
     podcast: str | None = None,
@@ -770,66 +847,78 @@ def _search_postgres(
     type_: str = "insights",
 ) -> dict:
     """Run Postgres FTS search (search_insights and/or search_moments). Returns {query, total, hits}."""
-    import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url:
-        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     limit = min(limit, 100)
     hits: list[dict] = []
+    
+    # 1. Video insights
     if type_ in ("insights", "all") and q and q.strip():
-        conn = psycopg2.connect(db_url, connect_timeout=10)
-        cur = conn.cursor()
+        conn = None
         try:
-            where_clauses = ["fts @@ websearch_to_tsquery('english', %s)"]
-            params: list = [q.strip()]
-            if podcast:
-                where_clauses.append("podcast = %s")
-                params.append(podcast)
-            if category:
-                where_clauses.append("category ILIKE %s")
-                params.append(f"%{category}%")
-            if video_id:
-                where_clauses.append("video_id = %s")
-                params.append(video_id)
-            params.append(limit)
-            cur.execute(
-                f"""
-                SELECT id, video_id, podcast, category, title, description, start_time_sec, end_time_sec,
-                       ts_rank(fts, websearch_to_tsquery('english', %s)) AS rank,
-                       title AS headline_title,
-                       ts_headline('english', description, websearch_to_tsquery('english', %s),
-                           'MaxFragments=1,MaxWords=20,MinWords=5') AS headline_description,
-                       (SELECT EXISTS (SELECT 1 FROM visual_moments vm WHERE vm.video_id = insights.video_id)) as is_multimodal
-                FROM insights
-                WHERE {" AND ".join(where_clauses)}
-                ORDER BY rank DESC
-                LIMIT %s
-                """,
-                [q.strip(), q.strip()] + params,
-            )
-            for row in cur.fetchall():
-                hits.append({
-                    "type": "insight",
-                    "id": str(row[0]),
-                    "video_id": row[1],
-                    "podcast": row[2],
-                    "category": row[3],
-                    "title": row[4],
-                    "description": row[5],
-                    "start_time_sec": float(row[6]) if row[6] is not None else None,
-                    "end_time_sec": float(row[7]) if row[7] is not None else None,
-                    "rank": float(row[8]) if row[8] is not None else 0,
-                    "headline_title": row[9],
-                    "headline_description": row[10],
-                    "is_multimodal": row[11],
-                })
+            conn = _get_db_conn()
+            cur = conn.cursor()
+            def _do_search(query_str: str) -> list[dict]:
+                where_clauses = ["fts @@ websearch_to_tsquery('english', %s)"]
+                params: list = [query_str.strip()]
+                if podcast:
+                    where_clauses.append("podcast = %s")
+                    params.append(podcast)
+                if category:
+                    where_clauses.append("category ILIKE %s")
+                    params.append(f"%{category}%")
+                if video_id:
+                    where_clauses.append("video_id = %s")
+                    params.append(video_id)
+                
+                cur.execute(
+                    f"""
+                    SELECT id, video_id, podcast, category, title, description, start_time_sec, end_time_sec,
+                           ts_rank(fts, websearch_to_tsquery('english', %s)) AS rank,
+                           title AS headline_title,
+                           ts_headline('english', description, websearch_to_tsquery('english', %s),
+                               'MaxFragments=1,MaxWords=20,MinWords=5') AS headline_description,
+                           (SELECT EXISTS (SELECT 1 FROM visual_moments vm WHERE vm.video_id = insights.video_id)) as is_multimodal
+                    FROM insights
+                    WHERE {" AND ".join(where_clauses)}
+                    ORDER BY rank DESC
+                    LIMIT %s
+                    """,
+                    [query_str.strip(), query_str.strip()] + params + [limit],
+                )
+                res = []
+                for row in cur.fetchall():
+                    res.append({
+                        "type": "insight",
+                        "id": str(row[0]),
+                        "video_id": row[1],
+                        "podcast": row[2],
+                        "category": row[3],
+                        "title": row[4],
+                        "description": row[5],
+                        "start_time_sec": float(row[6]) if row[6] is not None else None,
+                        "end_time_sec": float(row[7]) if row[7] is not None else None,
+                        "rank": float(row[8]) if row[8] is not None else 0,
+                        "headline_title": row[9],
+                        "headline_description": row[10],
+                        "is_multimodal": row[11],
+                    })
+                return res
+
+            hits = _do_search(q)
+            if not hits and " OR " not in q:
+                kw_q = _extract_keywords(q)
+                if kw_q and kw_q != q.lower().strip():
+                    hits = _do_search(kw_q)
+        except Exception as e:
+            _log.error("search_insights_failed", extra={"error": str(e)})
         finally:
-            cur.close()
-            conn.close()
+            if conn: _release_db_conn(conn)
+
+    # 2. Timestamp moments
     if type_ in ("moments", "all") and q and q.strip():
-        conn = psycopg2.connect(db_url, connect_timeout=10)
-        cur = conn.cursor()
+        conn = None
         try:
+            conn = _get_db_conn()
+            cur = conn.cursor()
             seg_where = ["fts @@ websearch_to_tsquery('english', %s)"]
             seg_params: list = [q.strip()]
             if podcast:
@@ -838,7 +927,7 @@ def _search_postgres(
             if video_id:
                 seg_where.append("video_id = %s")
                 seg_params.append(video_id)
-            seg_params.append(limit)
+            
             cur.execute(
                 f"""
                 SELECT id, video_id, podcast, start_time_sec, end_time_sec, text, speaker_label,
@@ -850,7 +939,7 @@ def _search_postgres(
                 ORDER BY rank DESC
                 LIMIT %s
                 """,
-                [q.strip(), q.strip()] + seg_params,
+                [q.strip(), q.strip()] + seg_params + [limit],
             )
             for row in cur.fetchall():
                 hits.append({
@@ -865,105 +954,107 @@ def _search_postgres(
                     "rank": float(row[7]) if row[7] is not None else 0,
                     "headline": row[8],
                 })
+        except Exception as e:
+            _log.error("search_moments_failed", extra={"error": str(e)})
         finally:
-            cur.close()
-            conn.close()
-    # Phase 2: Filter by person_id or company_id (post-search filter)
-    if person_id or company_id or is_panzerism:
-        conn = psycopg2.connect(db_url, connect_timeout=10)
-        cur = conn.cursor()
+            if conn: _release_db_conn(conn)
+
+    # 3. Post-search filters (Person/Company)
+    if (person_id or company_id or is_panzerism) and hits:
+        conn = None
         try:
+            conn = _get_db_conn()
+            cur = conn.cursor()
             filtered_hits = []
             for h in hits:
                 ins_id = h.get("id")
-                if not ins_id:
-                    continue
-                # Check person filter
+                if not ins_id: continue
                 if person_id:
-                    cur.execute(
-                        "SELECT 1 FROM insight_people WHERE insight_id = %s AND person_id = %s",
-                        (ins_id, person_id),
-                    )
-                    if not cur.fetchone():
-                        continue
-                # Check company filter
+                    cur.execute("SELECT 1 FROM insight_people WHERE insight_id = %s AND person_id = %s", (ins_id, person_id))
+                    if not cur.fetchone(): continue
                 if company_id:
-                    cur.execute(
-                        "SELECT 1 FROM insight_companies WHERE insight_id = %s AND company_id = %s",
-                        (ins_id, company_id),
-                    )
-                    if not cur.fetchone():
-                        continue
-                # Check Panzerisms (speaker = Jason Panzer)
+                    cur.execute("SELECT 1 FROM insight_companies WHERE insight_id = %s AND company_id = %s", (ins_id, company_id))
+                    if not cur.fetchone(): continue
                 if is_panzerism:
-                    # Find person_id for "Jason Panzer" or similar
-                    cur.execute(
-                        "SELECT id FROM people WHERE LOWER(name) LIKE %s",
-                        ("%panzer%",),
-                    )
+                    cur.execute("SELECT id FROM people WHERE LOWER(name) LIKE %s", ("%panzer%",))
                     panzer_id = cur.fetchone()
                     if panzer_id:
-                        cur.execute(
-                            "SELECT 1 FROM insight_people WHERE insight_id = %s AND person_id = %s",
-                            (ins_id, str(panzer_id[0])),
-                        )
-                        if not cur.fetchone():
-                            continue
-                    else:
-                        continue
+                        cur.execute("SELECT 1 FROM insight_people WHERE insight_id = %s AND person_id = %s", (ins_id, str(panzer_id[0])))
+                        if not cur.fetchone(): continue
+                    else: continue
                 filtered_hits.append(h)
             hits = filtered_hits[:limit]
+        except Exception as e:
+            _log.error("search_filter_failed", extra={"error": str(e)})
         finally:
-            cur.close()
-            conn.close()
-    # Newsletter insights — included unless type_ is "moments" or explicit "insights" with no q
+            if conn: _release_db_conn(conn)
+
+    # 4. Newsletter insights
     if type_ in ("insights", "all", "newsletters") and q and q.strip():
-        conn = psycopg2.connect(db_url, connect_timeout=10)
-        cur = conn.cursor()
+        conn = None
         try:
-            q_clean = q.strip()
-            nl_where = ["to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')) @@ websearch_to_tsquery('english', %s)"]
-            nl_params: list = [q_clean, q_clean]  # first for WHERE tsquery, second for ts_rank
-            if category:
-                nl_where.append("ni.category ILIKE %s")
-                nl_params.append(f"%{category}%")
-            nl_params.append(limit)
-            cur.execute(
-                f"""
-                SELECT ni.id, ni.source, ni.category, ni.title, ni.description,
-                       n.subject, n.author, n.published_at,
-                       ts_rank(to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')), websearch_to_tsquery('english', %s)) AS rank,
-                       ni.newsletter_id::text
-                FROM newsletter_insights ni
-                JOIN newsletters n ON n.id = ni.newsletter_id
-                WHERE {" AND ".join(nl_where)}
-                ORDER BY rank DESC
-                LIMIT %s
-                """,
-                nl_params,
-            )
-            for row in cur.fetchall():
-                hits.append({
-                    "type": "newsletter_insight",
-                    "id": str(row[0]),
-                    "source": row[1],
-                    "category": row[2],
-                    "title": row[3],
-                    "description": row[4],
-                    "subject": row[5],
-                    "author": row[6],
-                    "published_at": row[7].isoformat() if row[7] else None,
-                    "rank": float(row[8]) if row[8] is not None else 0,
-                    "headline_title": row[3],
-                    "headline_description": row[4],
-                    "newsletter_id": row[9],
-                })
+            conn = _get_db_conn()
+            cur = conn.cursor()
+            def _do_newsletter_search(query_str: str) -> list[dict]:
+                q_clean = query_str.strip()
+                nl_where = ["to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')) @@ websearch_to_tsquery('english', %s)"]
+                nl_params: list = [q_clean, q_clean]
+                if podcast:
+                    nl_where.append("ni.source = %s")
+                    nl_params.append(podcast)
+                if category:
+                    nl_where.append("ni.category ILIKE %s")
+                    nl_params.append(f"%{category}%")
+                
+                cur.execute(
+                    f"""
+                    SELECT ni.id, ni.source, ni.category, ni.title, ni.description,
+                           n.subject, n.author, n.published_at,
+                           ts_rank(to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')), websearch_to_tsquery('english', %s)) AS rank,
+                           ni.newsletter_id::text
+                    FROM newsletter_insights ni
+                    JOIN newsletters n ON n.id = ni.newsletter_id
+                    WHERE {" AND ".join(nl_where)}
+                    ORDER BY rank DESC
+                    LIMIT %s
+                    """,
+                    nl_params + [limit],
+                )
+                res = []
+                for row in cur.fetchall():
+                    res.append({
+                        "type": "newsletter_insight",
+                        "id": str(row[0]),
+                        "source": row[1],
+                        "category": row[2],
+                        "title": row[3],
+                        "description": row[4],
+                        "subject": row[5],
+                        "author": row[6],
+                        "published_at": row[7].isoformat() if row[7] else None,
+                        "rank": float(row[8]) if row[8] is not None else 0,
+                        "headline_title": row[3],
+                        "headline_description": row[4],
+                        "newsletter_id": row[9],
+                    })
+                return res
+
+            nl_hits = _do_newsletter_search(q)
+            if not nl_hits and " OR " not in q:
+                kw_q = _extract_keywords(q)
+                if kw_q and kw_q != q.lower().strip():
+                    nl_hits = _do_newsletter_search(kw_q)
+            hits.extend(nl_hits)
+        except Exception as e:
+            _log.error("search_newsletter_failed", extra={"error": str(e)})
         finally:
-            cur.close()
-            conn.close()
-    if type_ == "all" and hits:
-        hits.sort(key=lambda h: h.get("rank") or 0, reverse=True)
+            if conn: _release_db_conn(conn)
+
+    # Final Rank-based sort and limit for combined results
+    if hits:
+        hits.sort(key=lambda h: float(h.get("rank") or 0), reverse=True)
         hits = hits[:limit]
+        
     return {"query": q or "(all)", "total": len(hits), "hits": hits}
 
 
@@ -978,22 +1069,27 @@ def search(
     is_panzerism: bool = False,
     limit: int = 20,
     type_: str = "insights",
-    _: dict = Depends(_verify_supabase_jwt),
+    user: dict | None = Depends(_get_current_user_optional),
 ):
-    """Search insights and/or timestamp moments via Postgres FTS. Requires Bearer token (Supabase Auth). Params: q, podcast, category, video_id, person_id, company_id, is_panzerism, limit, type=insights|moments|all."""
+    """Search insights and/or timestamp moments via Postgres FTS. Public for insights; Requires auth for moments. Params: q, podcast, category, video_id, person_id, company_id, is_panzerism, limit, type=insights|moments|all."""
+    if type_ in ("moments", "all") and not user:
+        # Fallback: if not logged in but asking for 'all', just return insights
+        if type_ == "all":
+            type_ = "insights"
+        else:
+            raise HTTPException(status_code=401, detail="Authentication required for timestamp moments")
+            
     return _search_postgres(q, podcast=podcast, category=category, video_id=video_id, person_id=person_id, company_id=company_id, is_panzerism=is_panzerism, limit=limit, type_=type_)
 
 
 def _list_episodes(podcast: str | None = None, limit: int = 100) -> dict:
     """List videos (episodes) with optional podcast filter. For catalog."""
-    import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url:
-        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     limit = min(limit, 500)
-    conn = psycopg2.connect(db_url, connect_timeout=10)
-    cur = conn.cursor()
+    conn = None
     try:
+        conn = _get_db_conn()
+        cur = conn.cursor()
+        
         # Detect which videos have visual moments (multimodal)
         cur.execute("SELECT DISTINCT video_id FROM visual_moments")
         multimodal_ids = {r[0] for r in cur.fetchall()}
@@ -1034,21 +1130,20 @@ def _list_episodes(podcast: str | None = None, limit: int = 100) -> dict:
             for r in rows
         ]
         return {"episodes": episodes, "total": len(episodes)}
+    except Exception as e:
+        _log.error("list_episodes_failed", extra={"error": str(e)})
+        raise HTTPException(status_code=500, detail="Failed to list episodes")
     finally:
-        cur.close()
-        conn.close()
+        if conn:
+            _release_db_conn(conn)
 
 
 def _list_people(limit: int = 200) -> dict:
     """List people for directory."""
-    import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url:
-        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
-    limit = min(limit, 500)
-    conn = psycopg2.connect(db_url, connect_timeout=10)
-    cur = conn.cursor()
+    conn = None
     try:
+        conn = _get_db_conn()
+        cur = conn.cursor()
         cur.execute(
             "SELECT id, name, role_or_title FROM people ORDER BY name LIMIT %s",
             (limit,),
@@ -1059,9 +1154,12 @@ def _list_people(limit: int = 200) -> dict:
             for r in rows
         ]
         return {"people": people_list, "total": len(people_list)}
+    except Exception as e:
+        _log.error("list_people_failed", extra={"error": str(e)})
+        raise HTTPException(status_code=500, detail="Failed to list people")
     finally:
-        cur.close()
-        conn.close()
+        if conn:
+            _release_db_conn(conn)
 
 
 def _list_insights(
@@ -1070,14 +1168,11 @@ def _list_insights(
     limit: int = 50,
 ) -> dict:
     """List insights with optional category/podcast filter (for Listen pages)."""
-    import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url:
-        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     limit = min(limit, 100)
-    conn = psycopg2.connect(db_url, connect_timeout=10)
-    cur = conn.cursor()
+    conn = None
     try:
+        conn = _get_db_conn()
+        cur = conn.cursor()
         if category and podcast:
             cur.execute(
                 """
@@ -1139,9 +1234,12 @@ def _list_insights(
             for r in rows
         ]
         return {"category": category, "total": len(hits), "hits": hits}
+    except Exception as e:
+        _log.error("list_insights_failed", extra={"error": str(e)})
+        raise HTTPException(status_code=500, detail="Failed to list insights")
     finally:
-        cur.close()
-        conn.close()
+        if conn:
+            _release_db_conn(conn)
 
 
 @app.get("/episodes")
@@ -2049,27 +2147,6 @@ def chat(
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
-
-    # Extract keywords from conversational questions before FTS search.
-    # plainto/websearch_to_tsquery require ALL terms to match; a conversational
-    # question like "How do 8-figure brands approach BFCM prep?" returns 0 hits
-    # because stop words + rare terms dilute the AND-query. We strip noise words
-    # and try the full question first, then fall back to keyword-only query.
-    _STOP = frozenset(["how", "do", "does", "what", "why", "when", "where", "who",
-                       "can", "should", "would", "could", "are", "is", "the", "a",
-                       "an", "to", "for", "of", "in", "on", "at", "about", "with",
-                       "and", "or", "but", "not", "if", "then", "i", "we", "you",
-                       "they", "my", "your", "their", "say", "says", "approach",
-                       "tell", "think", "use", "some", "most", "more", "best",
-                       "good", "get", "into", "from", "by"])
-
-    def _extract_keywords(q: str) -> str:
-        import re as _re
-        # Strip punctuation (keep letters/digits/spaces), lowercase, split
-        words = _re.sub(r"[^\w\s]", " ", q.lower()).split()
-        # Remove stop words, short words, and tokens containing digits (e.g. "8")
-        kw = [w for w in words if w not in _STOP and len(w) > 2 and not any(c.isdigit() for c in w)]
-        return " OR ".join(kw[:6])  # OR-joined for maximum recall in fallback
 
     # Search both podcast insights and newsletter insights
     search_result = _search_postgres(msg, limit=body.context_limit, type_="all")
@@ -3110,50 +3187,47 @@ def list_newsletter_insights(
     offset: int = 0,
 ):
     """Search newsletter insights via Postgres FTS. Filter by source and/or category."""
-    import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
-    if not db_url:
-        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+    conn = None
     try:
-        conn = psycopg2.connect(db_url, connect_timeout=15)
+        conn = _get_db_conn()
         cur = conn.cursor()
-        try:
-            where = []
-            params: list = []
-            if q:
-                where.append("to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')) @@ websearch_to_tsquery('english', %s)")
-                params.append(q)
-            if source:
-                where.append("ni.source = %s")
-                params.append(source)
-            if category:
-                where.append("ni.category ILIKE %s")
-                params.append(f"%{category}%")
-            where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-            params.extend([limit, offset])
-            cur.execute(
-                f"""
-                SELECT ni.id, ni.source, ni.category, ni.title, ni.description,
-                       n.subject, n.author, n.published_at, ni.newsletter_id::text
-                FROM newsletter_insights ni
-                JOIN newsletters n ON n.id = ni.newsletter_id
-                {where_sql}
-                ORDER BY n.published_at DESC NULLS LAST
-                LIMIT %s OFFSET %s
-                """,
-                params,
-            )
-            cols = [d[0] for d in cur.description]
-            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-            for r in rows:
-                if r.get("published_at"):
-                    r["published_at"] = r["published_at"].isoformat()
-            return {"insights": rows, "count": len(rows)}
-        finally:
-            cur.close()
-            conn.close()
+        where = []
+        params: list = []
+        if q:
+            where.append("to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')) @@ websearch_to_tsquery('english', %s)")
+            params.append(q)
+        if source:
+            where.append("ni.source = %s")
+            params.append(source)
+        if category:
+            where.append("ni.category ILIKE %s")
+            params.append(f"%{category}%")
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        params.extend([limit, offset])
+        cur.execute(
+            f"""
+            SELECT ni.id, ni.source, ni.category, ni.title, ni.description,
+                   n.subject, n.author, n.published_at, ni.newsletter_id::text
+            FROM newsletter_insights ni
+            JOIN newsletters n ON n.id = ni.newsletter_id
+            {where_sql}
+            ORDER BY n.published_at DESC NULLS LAST
+            LIMIT %s OFFSET %s
+            """,
+            params,
+        )
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        for r in rows:
+            if r.get("published_at"):
+                r["published_at"] = r["published_at"].isoformat()
+        return {"insights": rows, "count": len(rows)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _log.error("list_newsletter_insights_failed", extra={"error": str(e)})
+        raise HTTPException(status_code=500, detail="Failed to list newsletter insights")
+    finally:
+        if conn:
+            _release_db_conn(conn)
 
 
 class TopicGuideRequest(BaseModel):
@@ -3172,33 +3246,46 @@ def topic_guide(body: TopicGuideRequest):
         raise HTTPException(status_code=400, detail="topic required")
 
     # Search all content types for this topic
-    results = _search_postgres(topic, limit=15, type_="all")
-    hits = results.get("hits", [])
+    results = _search_postgres(topic, limit=30, type_="all")
+    hits = results.get("hits") or []
 
     # Also search newsletter insights directly (they're included in "all" but let's be thorough)
+    if not hits:
+        # Retry with extracted keywords for broader matching (similar to /chat)
+        kw_query = _extract_keywords(topic)
+        if kw_query and kw_query.replace(" OR ", " ").strip() != topic.lower().strip():
+            results = _search_postgres(kw_query, limit=30, type_="all")
+            hits = results.get("hits", [])
+
     if not hits:
         raise HTTPException(status_code=404, detail=f"No content found on topic: {topic}")
 
     # Build context from hits
     context_parts = []
     sources = []
+    seen_sources = set()
     for h in hits:
         t = h.get("headline_title") or h.get("title") or ""
         d = h.get("headline_description") or h.get("description") or h.get("text") or ""
         pod = (h.get("podcast") or h.get("source") or "").replace("_", " ")
         author = h.get("author") or pod
+        
+        # Deduplicate sources for the sources list
+        source_key = f"{h.get('type')}:{h.get('id')}"
         if t or d:
             context_parts.append(f"**{t}** ({author}): {d[:400]}")
-            sources.append({
-                "id": h.get("id", ""),
-                "title": t,
-                "description": d,
-                "source": pod,
-                "type": h.get("type", ""),
-                "podcast": h.get("podcast"),
-                "video_id": h.get("video_id"),
-                "author": author,
-            })
+            if source_key not in seen_sources:
+                sources.append({
+                    "id": h.get("id", ""),
+                    "title": t,
+                    "description": d,
+                    "source": pod,
+                    "type": h.get("type", ""),
+                    "podcast": h.get("podcast"),
+                    "video_id": h.get("video_id"),
+                    "author": author,
+                })
+                seen_sources.add(source_key)
 
     context = "\n\n".join(context_parts)
     prompt = (
