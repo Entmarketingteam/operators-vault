@@ -374,6 +374,54 @@ function InsightModal({ insight, onClose, session }: { insight: Insight; onClose
   );
 }
 
+// ─── Playbook Hero ────────────────────────────────────────────────────────
+
+function PlaybookHero({ 
+  topic, 
+  tier, 
+  onGenerate 
+}: { 
+  topic: string; 
+  tier: string; 
+  onGenerate: (t: string) => void 
+}) {
+  const tierLabel = tier === "1" ? "$0-$1M" : tier === "2" ? "$1-$10M" : "$10M+";
+  
+  return (
+    <div className="w-full mb-8 relative group">
+      <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-emerald-500 rounded-2xl blur opacity-20 group-hover:opacity-30 transition duration-1000"></div>
+      <div className="relative vault-card p-6 sm:p-8 bg-[#0d0d14] border-indigo-500/20">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-3">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 text-[10px] font-bold uppercase tracking-wider border border-indigo-500/20">
+                <Sparkles className="h-3 w-3" />
+                Strategic GTM Engine
+              </span>
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 text-[10px] font-bold uppercase tracking-wider border border-emerald-500/20">
+                Tier {tier}: {tierLabel}
+              </span>
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">
+              Generate the {topic.split(' OR ')[0].replace(/"/g, '')} Playbook
+            </h2>
+            <p className="text-[var(--muted-foreground)] text-sm max-w-xl leading-relaxed">
+              Synthesize insights from Nik Sharma, Taylor Holiday, and 9-figure operators into a tiered roadmap tailored for your current scale.
+            </p>
+          </div>
+          <button
+            onClick={() => onGenerate(topic)}
+            className="shrink-0 flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-lg shadow-indigo-900/40 transition-all active:scale-95"
+          >
+            <BookOpen className="h-4.5 w-4.5" />
+            Build Full Playbook
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Insight Row ──────────────────────────────────────────────────────────
 
 function InsightRow({ insight, onExpand }: { insight: Insight; onExpand: (i: Insight) => void }) {
@@ -432,6 +480,7 @@ export default function HomePage() {
   const [source, setSource] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [activeTopic, setActiveTopic] = useState("");
+  const [revenueTier, setRevenueTier] = useState("2"); // Default to Tier 2 ($1-10M)
   const [results, setResults] = useState<Insight[]>([]);
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
@@ -493,13 +542,24 @@ export default function HomePage() {
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    setActiveTopic(""); // Clear active topic when manual search performed
     doSearch(query, source, typeFilter, session?.access_token);
   };
 
-  const handleTopicClick = (topicQuery: string) => {
+  const handleTopicClick = (topicLabel: string, topicQuery: string) => {
     setQuery(topicQuery);
-    setActiveTopic(topicQuery);
+    setActiveTopic(topicLabel);
     setSource("");
+    setTypeFilter("");
+    doSearch(topicQuery, "", "", session?.access_token);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const handleGeneratePlaybook = (topic: string) => {
+    // Redirect to guides page with topic and tier
+    const cleanTopic = activeTopic || topic.split(' OR ')[0].replace(/"/g, '');
+    window.location.href = `/guides?topic=${encodeURIComponent(cleanTopic)}&tier=${revenueTier}`;
+  };
     setTypeFilter("");
     doSearch(topicQuery, "", "", session?.access_token);
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -549,6 +609,26 @@ export default function HomePage() {
           <span className="font-bold text-sm tracking-tight text-white/90">ECOM Operators Vault</span>
         </div>
 
+        {/* Revenue Tier Selector */}
+        <div className="px-2">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] mb-3">Your Revenue Tier</div>
+          <div className="grid grid-cols-3 gap-1 p-1 bg-[var(--secondary)] rounded-xl border border-[var(--border)]">
+            {[
+              { id: "1", label: "$0-1M" },
+              { id: "2", label: "$1-10M" },
+              { id: "3", label: "$10M+" },
+            ].map(tier => (
+              <button
+                key={tier.id}
+                onClick={() => { setRevenueTier(tier.id); haptic("selection"); }}
+                className={`py-1.5 rounded-lg text-[10px] font-bold transition-all ${revenueTier === tier.id ? "bg-indigo-600 text-white shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"}`}
+              >
+                {tier.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* Categories */}
         <div className="space-y-4">
           <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] mb-2 px-2">Unit Economics & True Metrics</div>
@@ -567,10 +647,10 @@ export default function HomePage() {
             ].map(item => (
               <button
                 key={item.label}
-                onClick={() => handleTopicClick(item.query)}
-                className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs transition-all group ${activeTopic === item.query ? "bg-indigo-600/10 text-indigo-300 font-medium border border-indigo-500/20 shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"}`}
+                onClick={() => handleTopicClick(item.label, item.query)}
+                className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs transition-all group ${activeTopic === item.label ? "bg-indigo-600/10 text-indigo-300 font-medium border border-indigo-500/20 shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"}`}
               >
-                <item.icon className={`h-3 w-3 shrink-0 ${activeTopic === item.query ? "text-indigo-400" : "opacity-60 group-hover:opacity-100"}`} />
+                <item.icon className={`h-3 w-3 shrink-0 ${activeTopic === item.label ? "text-indigo-400" : "opacity-60 group-hover:opacity-100"}`} />
                 {item.label}
               </button>
             ))}
@@ -588,10 +668,10 @@ export default function HomePage() {
             ].map(item => (
               <button
                 key={item.label}
-                onClick={() => handleTopicClick(item.query)}
-                className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs transition-all group ${activeTopic === item.query ? "bg-emerald-600/10 text-emerald-300 font-medium border border-emerald-500/20 shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"}`}
+                onClick={() => handleTopicClick(item.label, item.query)}
+                className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs transition-all group ${activeTopic === item.label ? "bg-emerald-600/10 text-emerald-300 font-medium border border-emerald-500/20 shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"}`}
               >
-                <item.icon className={`h-3 w-3 shrink-0 ${activeTopic === item.query ? "text-emerald-400" : "opacity-60 group-hover:opacity-100"}`} />
+                <item.icon className={`h-3 w-3 shrink-0 ${activeTopic === item.label ? "text-emerald-400" : "opacity-60 group-hover:opacity-100"}`} />
                 {item.label}
               </button>
             ))}
@@ -615,10 +695,10 @@ export default function HomePage() {
             ].map(item => (
               <button
                 key={item.label}
-                onClick={() => handleTopicClick(item.query)}
-                className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs transition-all group ${activeTopic === item.query ? "bg-indigo-600/10 text-indigo-300 font-medium border border-indigo-500/20 shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"}`}
+                onClick={() => handleTopicClick(item.label, item.query)}
+                className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs transition-all group ${activeTopic === item.label ? "bg-indigo-600/10 text-indigo-300 font-medium border border-indigo-500/20 shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"}`}
               >
-                <item.icon className={`h-3 w-3 shrink-0 ${activeTopic === item.query ? "text-indigo-400" : "opacity-60 group-hover:opacity-100"}`} />
+                <item.icon className={`h-3 w-3 shrink-0 ${activeTopic === item.label ? "text-indigo-400" : "opacity-60 group-hover:opacity-100"}`} />
                 {item.label}
               </button>
             ))}
@@ -637,10 +717,10 @@ export default function HomePage() {
             ].map(item => (
               <button
                 key={item.label}
-                onClick={() => handleTopicClick(item.query)}
-                className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs transition-all group ${activeTopic === item.query ? "bg-indigo-600/10 text-indigo-300 font-medium border border-indigo-500/20 shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"}`}
+                onClick={() => handleTopicClick(item.label, item.query)}
+                className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs transition-all group ${activeTopic === item.label ? "bg-indigo-600/10 text-indigo-300 font-medium border border-indigo-500/20 shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"}`}
               >
-                <item.icon className={`h-3 w-3 shrink-0 ${activeTopic === item.query ? "text-indigo-400" : "opacity-60 group-hover:opacity-100"}`} />
+                <item.icon className={`h-3 w-3 shrink-0 ${activeTopic === item.label ? "text-indigo-400" : "opacity-60 group-hover:opacity-100"}`} />
                 {item.label}
               </button>
             ))}
@@ -766,6 +846,14 @@ export default function HomePage() {
           </div>
         ) : (
           <>
+            {activeTopic && !query.includes("!") && (
+              <PlaybookHero 
+                topic={query} 
+                tier={revenueTier} 
+                onGenerate={handleGeneratePlaybook} 
+              />
+            )}
+
             <div className="flex items-center justify-between mb-5 px-1">
               <div className="flex flex-col sm:flex-row sm:items-center gap-2">
                 <span className="text-sm font-bold tracking-tight">

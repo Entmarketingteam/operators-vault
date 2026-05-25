@@ -74,6 +74,20 @@ export default function GuidesPage() {
     return () => subscription.unsubscribe();
   }, []);
 
+  // Handle URL params for auto-generation
+  useEffect(() => {
+    if (!session || loading || guide) return;
+    
+    const params = new URLSearchParams(window.location.search);
+    const urlTopic = params.get("topic");
+    if (urlTopic) {
+      setTopic(urlTopic);
+      handleGenerate(undefined, urlTopic);
+      // Clean up URL without reload
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, [session, loading, guide]);
+
   if (sessionLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
