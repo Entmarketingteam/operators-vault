@@ -505,6 +505,22 @@ export default function HomePage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  const toggleActionLens = (lens: string) => {
+    setQuery(prev => {
+      let newQuery;
+      if (prev.startsWith(lens)) {
+        newQuery = prev.replace(lens, "");
+      } else {
+        const otherLens = lens === "!mistakes " ? "!tactical " : "!mistakes ";
+        const clean = prev.startsWith(otherLens) ? prev.replace(otherLens, "") : prev;
+        newQuery = `${lens}${clean}`;
+      }
+      doSearch(newQuery, source, typeFilter, session?.access_token);
+      return newQuery;
+    });
+    haptic("selection");
+  };
+
   const clearFilters = () => {
     setQuery("");
     setSource("");
@@ -555,6 +571,27 @@ export default function HomePage() {
                 className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs transition-all group ${activeTopic === item.query ? "bg-indigo-600/10 text-indigo-300 font-medium border border-indigo-500/20 shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"}`}
               >
                 <item.icon className={`h-3 w-3 shrink-0 ${activeTopic === item.query ? "text-indigo-400" : "opacity-60 group-hover:opacity-100"}`} />
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Growth Playbooks */}
+        <div className="space-y-4">
+          <div className="text-[10px] font-bold uppercase tracking-widest text-[var(--muted-foreground)] mb-2 px-2">Growth Playbooks</div>
+          <div className="space-y-0.5">
+            {[
+              { label: "Tier 1: Validation ($0-1M)", query: "product market fit validation hook acquisition", icon: Zap },
+              { label: "Tier 2: Efficiency ($1-10M)", query: "unit economics efficiency scaling contribution", icon: Activity },
+              { label: "Tier 3: Scale ($10M+)", query: "operations logistics management organization", icon: Layers },
+            ].map(item => (
+              <button
+                key={item.label}
+                onClick={() => handleTopicClick(item.query)}
+                className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-xs transition-all group ${activeTopic === item.query ? "bg-emerald-600/10 text-emerald-300 font-medium border border-emerald-500/20 shadow-sm" : "text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-white/5"}`}
+              >
+                <item.icon className={`h-3 w-3 shrink-0 ${activeTopic === item.query ? "text-emerald-400" : "opacity-60 group-hover:opacity-100"}`} />
                 {item.label}
               </button>
             ))}
@@ -660,6 +697,24 @@ export default function HomePage() {
             )}
           </div>
         </form>
+
+        {/* Action Lenses */}
+        <div className="flex items-center gap-3 mb-6">
+          <button
+            onClick={() => toggleActionLens("!mistakes ")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border transition-all ${query.startsWith("!mistakes ") ? "bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-lg shadow-rose-900/20" : "bg-[var(--card)]/50 border-[var(--border)] text-[var(--muted-foreground)] hover:border-rose-500/30 hover:text-rose-200"}`}
+          >
+            <AlertTriangle className="h-3.5 w-3.5" />
+            The Mistake Map ⚠️
+          </button>
+          <button
+            onClick={() => toggleActionLens("!tactical ")}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold border transition-all ${query.startsWith("!tactical ") ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-lg shadow-emerald-900/20" : "bg-[var(--card)]/50 border-[var(--border)] text-[var(--muted-foreground)] hover:border-emerald-500/30 hover:text-emerald-200"}`}
+          >
+            <Zap className="h-3.5 w-3.5" />
+            Tactical Micro-Wins ⚡
+          </button>
+        </div>
 
         {/* Quick Filters */}
         <div className="flex flex-wrap items-center gap-2 mb-6">
