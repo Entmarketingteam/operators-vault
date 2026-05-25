@@ -850,6 +850,18 @@ def _search_postgres(
     limit = min(limit, 100)
     hits: list[dict] = []
     
+    # Handle search modifiers
+    if q:
+        q = q.strip()
+        if q.startswith("!mistakes"):
+            q = q[len("!mistakes"):].strip()
+            if not q:
+                q = "failed loss error mistake regret"
+        elif q.startswith("!tactical"):
+            q = q[len("!tactical"):].strip()
+            if not q:
+                q = "step tool change hack quick"
+                
     # 1. Video insights
     if type_ in ("insights", "all") and q and q.strip():
         conn = None
@@ -2215,10 +2227,12 @@ Your knowledge base includes:
 - Podcast insights from 9 Operators, Marketing Operators, Finance Operators, and TITANS — featuring the top ecommerce operators in the world
 - Newsletters from Nik Sharma, Taylor Holiday (CTC/Common Thread Collective), Matt Bertulli, Chase Dimond, and the Operators Newsletter
 
-Your role is to give direct, operator-grade, actionable answers — not generic marketing advice. You think in real business terms:
-- True profitability metrics: MER (Marketing Efficiency Ratio), nCAC (new Customer Acquisition Cost), LTV:nCAC ratio, Contribution Margin, Net Profit, Payback Period — NOT just ROAS or CPM
-- Real growth frameworks that 8-figure operators actually use
-- Specific, named strategies with context on who uses them and why
+Your role is to give direct, operator-grade, actionable answers through the "Expert Stacking" framework. You must synthesize search results through three lenses:
+1. THE CREATIVE LENS (Nik Sharma style): Focus on hooks, landers, and content strategy.
+2. THE ECONOMIC LENS (Taylor Holiday style): Focus on MER, LTV:nCAC, and unit economics.
+3. THE OPERATIONAL LENS (Ridge Wallet style): Focus on SKU count, inventory, and scale.
+
+You think in real business terms (MER, nCAC, LTV:nCAC, Contribution Margin, etc.) and avoid generic marketing advice.
 
 When answering:
 1. Lead with the direct answer or framework — be specific, not vague
@@ -3290,14 +3304,17 @@ def topic_guide(body: TopicGuideRequest):
     context = "\n\n".join(context_parts)
     prompt = (
         f"You are an expert DTC and eCommerce operator analyst. "
-        f"Based on the following insights from industry experts, write a concise, actionable Topic Guide on: **{topic}**\n\n"
-        f"Format the guide in markdown with:\n"
-        f"- A 2-3 sentence executive summary\n"
-        f"- 3-5 key sections with headers\n"
-        f"- Bullet points under each section\n"
-        f"- A 'Key Takeaways' section at the end\n\n"
+        f"Based on the following insights from industry experts, write a concise, actionable Strategic Playbook on: **{topic}**\n\n"
+        f"Structure the playbook by Revenue Tier:\n"
+        f"1. TIER 1 ($0-$1M): Focus on foundation and initial traction.\n"
+        f"2. TIER 2 ($1M-$10M): Focus on optimization and systems.\n"
+        f"3. TIER 3 ($10M+): Focus on scale and advanced economics.\n\n"
+        f"For each tier, you MUST include:\n"
+        f"- Immediate Actions: Specific steps to take now.\n"
+        f"- Critical Metrics: Which KPIs matter most at this stage.\n\n"
+        f"Format the guide in markdown with clear headers for each tier and a 'Key Takeaways' section at the end.\n"
         f"Draw directly from these insights (cite the source name where relevant):\n\n{context}\n\n"
-        f"Write the guide now:"
+        f"Write the playbook now:"
     )
 
     agent_key = os.environ.get("AGENT_SERVER_API_KEY", "")
