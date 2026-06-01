@@ -15,7 +15,11 @@ supabase>=2.3.0
 
 # YouTube & media
 google-api-python-client>=2.111.0
-yt-dlp>=2026.3.17
+# Latest stable yt-dlp (2026.3.17) is bot-blocked by YouTube's current player.
+# Stable channel has not shipped a newer release; pin the newest nightly (prerelease)
+# which carries the up-to-date YouTube extractor. Exact == pin is required so pip
+# will install the prerelease (a >= constraint excludes .dev builds per PEP 440).
+yt-dlp==2026.5.25.234532.dev0
 youtube-transcript-api>=1.0.0
 
 # Transcription
@@ -24,4 +28,4 @@ deepgram-sdk>=5.0.0
 # Auth (Supabase JWT for private search)
 PyJWT>=2.8.0
 
-# Build cache bust: 2026-05-11
+# Build cache bust: 2026-06-01 (yt-dlp nightly pin)

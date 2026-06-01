@@ -100,8 +100,10 @@ def _extract_error_message(stderr: str, stdout: str, returncode: int) -> str:
     """Extract the most useful error message from yt-dlp output."""
     combined = (stderr + "\n" + stdout).strip() if stderr and stdout else (stderr or stdout or "")
     error_lines = [line.strip() for line in combined.split("\n") if line.strip()]
-    # Prioritize ERROR lines from yt-dlp
-    important = [l for l in error_lines if "ERROR" in l.upper() or "error" in l.lower()]
+    # Prioritize real yt-dlp ERROR lines. Match "ERROR:" with the colon so the
+    # verbose "[debug] Encodings: ... error utf-8 ..." line (printed by -v) is not
+    # mistaken for the actual error and masking the real failure reason.
+    important = [l for l in error_lines if "ERROR:" in l.upper()]
     if not important:
         important = [l for l in error_lines if not l.startswith("[download]") and not l.startswith("[info]") and not l.startswith("[debug]")]
     if not important:
