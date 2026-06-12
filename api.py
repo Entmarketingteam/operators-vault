@@ -74,7 +74,7 @@ app.mount("/static", StaticFiles(directory=str(_root / "static")), name="static"
 # ---------------------------------------------------------------------------
 def _run_startup_migration() -> None:
     """Run add_channel_configs.sql and add_speaker_profiles.sql on startup. Idempotent."""
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         return
     import psycopg2
@@ -300,7 +300,7 @@ def process(req: ProcessRequest):
 def _do_upsert_seed_links(rows: list[dict]) -> int:
     """Upsert rows into seed_links. Returns count. Raises on no DATABASE_URL."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=500, detail="DATABASE_URL not set")
     conn = psycopg2.connect(db_url)
@@ -351,7 +351,7 @@ async def seed_links_csv(request: Request):
 
 def _do_fetch_new() -> dict:
     """Fetch new from YouTube; returns {ok, upserted}. Raises HTTPException on env/error."""
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=500, detail="DATABASE_URL not set")
     if not os.environ.get("YOUTUBE_API_KEY"):
@@ -370,7 +370,7 @@ def _do_fetch_new() -> dict:
 
 def _do_sync(job_id: str | None = None) -> dict:
     """Run fetch-new then process-new. Returns {ok, upserted, processed, video_ids}. Raises on env/error."""
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=500, detail="DATABASE_URL not set")
     if not os.environ.get("YOUTUBE_API_KEY"):
@@ -451,7 +451,7 @@ def _do_sync(job_id: str | None = None) -> dict:
 def _do_process_new(job_id: str | None = None) -> dict:
     """Process all unprocessed videos in parallel. Returns {ok, processed, video_ids}. Raises on env/error."""
     import concurrent.futures
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=500, detail="DATABASE_URL not set")
 
@@ -538,7 +538,7 @@ def _do_extract_insights_from_transcripts(job_id: str | None = None, limit: int 
     import psycopg2
     from insight_extractor import extract_insights, extract_timestamps, generate_title, make_framework
 
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=500, detail="DATABASE_URL not set")
 
@@ -574,7 +574,7 @@ def _do_extract_insights_from_transcripts(job_id: str | None = None, limit: int 
             from company_extractor import extract_companies_from_text, link_insights_to_companies, link_video_to_companies
             from people_extractor import extract_people_from_segments, link_insights_to_people
 
-            db = os.environ["DATABASE_URL"]
+            db = _get_db_url()
             conn2 = psycopg2.connect(db)
             cur2 = conn2.cursor()
 
@@ -669,7 +669,7 @@ def extract_insights_backfill_async(limit: int = 300):
 @app.post("/run-migrate-phase1")
 def run_migrate_phase1():
     """Run sql/migrate_phase1_youtube_titans.sql (add view_count, thumbnail_url, etc.). Safe to call multiple times."""
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     path = _root / "sql" / "migrate_phase1_youtube_titans.sql"
@@ -706,7 +706,7 @@ def run_migrate_phase1():
 def health():
     """Check env, connectivity, jobs, and resource usage. Returns status, checks, active jobs, and memory info."""
     checks: dict[str, str] = {}
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         checks["database"] = "missing"
     else:
@@ -1275,7 +1275,7 @@ def people(
 def _get_person_by_slug(slug: str) -> dict:
     """Get person by slug with episodes and insights."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     conn = psycopg2.connect(db_url, connect_timeout=10)
@@ -1348,7 +1348,7 @@ def _get_person_by_slug(slug: str) -> dict:
 def _get_company_by_slug(slug: str) -> dict:
     """Get company by slug with episodes and insights."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     conn = psycopg2.connect(db_url, connect_timeout=10)
@@ -1444,7 +1444,7 @@ def _search_visuals(
 ) -> dict:
     """Search visual moments. Returns {query, total, hits}."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     limit = min(limit, 100)
@@ -1490,7 +1490,7 @@ def visuals_search(
 def _get_related_content(video_id: str, insight_id: str | None = None, limit: int = 5) -> dict:
     """Get related insights from the same video or similar videos."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     conn = psycopg2.connect(db_url, connect_timeout=10)
@@ -1570,7 +1570,7 @@ def get_visual_moments(
 ):
     """List visual moments for a specific video. Requires Bearer token."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         return {"moments": []}
     conn = psycopg2.connect(db_url)
@@ -1605,7 +1605,7 @@ def get_visual_moments(
 ):
     """List visual moments for a specific video. Requires Bearer token."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         return {"moments": []}
     conn = psycopg2.connect(db_url)
@@ -1655,7 +1655,7 @@ class SpeakerUpsertRequest(BaseModel):
 def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
     """List all speaker profiles."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     limit = min(limit, 200)
@@ -1763,7 +1763,7 @@ def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
 def _get_speaker_by_slug(slug: str) -> dict:
     """Get a speaker profile with their top insights."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     conn = psycopg2.connect(db_url, connect_timeout=10)
@@ -1993,7 +1993,7 @@ def _get_speaker_by_slug(slug: str) -> dict:
 def _upsert_speaker(data: SpeakerUpsertRequest) -> dict:
     """Upsert a speaker profile."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     conn = psycopg2.connect(db_url, connect_timeout=10)
@@ -2110,7 +2110,7 @@ def speaker_upsert(body: SpeakerUpsertRequest):
 def admin_migrate_host_fields():
     """Run the is_host/host_podcast migration directly. No auth required (idempotent DDL)."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     results = []
@@ -2156,7 +2156,7 @@ def chat(
     msg = (body.message or "").strip()
     if not msg:
         raise HTTPException(status_code=400, detail="message required")
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
 
@@ -2781,7 +2781,7 @@ def list_jobs(status: str | None = None):
 def stats():
     """Vault index status: per-podcast counts of videos in DB, processed (have transcription), and unprocessed. Use to see if 9 Operators / Marketing Operator are fully pulled and indexed."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
@@ -3094,7 +3094,7 @@ def list_newsletters(
 ):
     """List newsletters. Filter by source and/or processed status."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
@@ -3141,7 +3141,7 @@ def list_newsletters(
 def get_newsletter(newsletter_id: str):
     """Get a single newsletter with its full body text and all extracted insights."""
     import psycopg2
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
@@ -3350,7 +3350,7 @@ def topic_guide_search(q: str = "", limit: int = 10):
 @app.get("/newsletter-sources")
 def newsletter_sources():
     """List all active newsletter sources from DB (falls back to hardcoded if DB unavailable)."""
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         from newsletter_ingestor import _NEWSLETTER_SOURCES_FALLBACK
         return {"sources": _NEWSLETTER_SOURCES_FALLBACK, "source": "fallback"}
@@ -3382,7 +3382,7 @@ class NewsletterSourceCreateRequest(BaseModel):
 @app.post("/newsletter-sources")
 def newsletter_sources_create(req: NewsletterSourceCreateRequest):
     """Add a new newsletter source. Slug must be unique."""
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
@@ -3418,7 +3418,7 @@ def newsletter_sources_create(req: NewsletterSourceCreateRequest):
 @app.get("/channels")
 def list_channels():
     """List all active YouTube channel configs from DB (falls back to hardcoded if DB unavailable)."""
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         from youtube_client import DEFAULT_CHANNEL_HANDLES
         return {"channels": [{"slug": k, "channel_handle": v, "display_name": k.replace("_", " ").title()} for k, v in DEFAULT_CHANNEL_HANDLES.items()], "source": "fallback"}
@@ -3450,7 +3450,7 @@ class ChannelCreateRequest(BaseModel):
 @app.post("/channels")
 def channels_create(req: ChannelCreateRequest):
     """Add a new YouTube channel config. Slug must be unique. Channel handle should not include @."""
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
