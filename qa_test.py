@@ -24,7 +24,11 @@ if env_path.exists():
 
 import psycopg2
 
-DB_URL = os.environ["DATABASE_URL"]
+import db_utils
+
+# Route to the working Supabase pooler port (6543 transaction pooler drops SSL;
+# 5432 session pooler is healthy). See db_utils.resolve_db_url.
+DB_URL = db_utils.resolve_db_url() or os.environ["DATABASE_URL"]
 BASE_URL = "https://superb-smile-production.up.railway.app"
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndiZHdubHpiZ3VnZXd0bXZhaHdnIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg5Mzc0MzIsImV4cCI6MjA4NDUxMzQzMn0.8cW9UoDzsCzv8_JHU0imeY8NpOdF5e2XAE_Gxq6O_cs"
@@ -53,7 +57,7 @@ print("\n" + "=" * 70)
 print("SECTION 1: DATA QUALITY (DB Direct)")
 print("=" * 70)
 
-conn = psycopg2.connect(DB_URL, connect_timeout=15)
+conn = db_utils.connect(DB_URL, connect_timeout=15)
 cur = conn.cursor()
 
 # 1a. Total video coverage
@@ -241,7 +245,7 @@ def db_search(q, limit=10):
     if not q or not q.strip():
         return {"query": q, "total": 0, "hits": []}
 
-    conn2 = psycopg2.connect(DB_URL, connect_timeout=10)
+    conn2 = db_utils.connect(DB_URL, connect_timeout=10)
     cur2 = conn2.cursor()
     try:
         cur2.execute("""

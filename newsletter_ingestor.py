@@ -15,6 +15,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+import db_utils
+
 # ── Source config ─────────────────────────────────────────────────────────────
 
 # Hardcoded fallback — used if DB is unavailable or table doesn't exist yet
@@ -54,10 +56,10 @@ def load_newsletter_sources_from_db() -> dict:
     """
     try:
         import psycopg2
-        url = os.environ.get("DATABASE_URL", "")
+        url = db_utils.resolve_db_url() or ""
         if not url:
             return _NEWSLETTER_SOURCES_FALLBACK
-        conn = psycopg2.connect(url, sslmode="require")
+        conn = db_utils.connect(url, sslmode="require")
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT slug, author, gmail_query FROM newsletter_source_configs WHERE active = TRUE ORDER BY created_at"
@@ -174,7 +176,7 @@ def _get_pool():
         with _pool_lock:
             if _pool is None:
                 import psycopg2.pool
-                url = os.environ.get("DATABASE_URL", "")
+                url = db_utils.resolve_db_url() or ""
                 _pool = psycopg2.pool.ThreadedConnectionPool(2, 10, url, sslmode="require")
     return _pool
 
@@ -182,8 +184,8 @@ def _get_pool():
 def _db_conn():
     """Return a connection from the pool (caller must call pool.putconn when done)."""
     import psycopg2
-    url = os.environ.get("DATABASE_URL", "")
-    return psycopg2.connect(url, sslmode="require")
+    url = db_utils.resolve_db_url() or ""
+    return db_utils.connect(url, sslmode="require")
 
 
 def upsert_newsletter(
