@@ -84,6 +84,10 @@ def connect(url: str | None = None, *, retries: int = 3, **kwargs):
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
                 cur.fetchone()
+            # Roll back the probe's implicit transaction so the connection is
+            # returned in a clean (idle) state — INTRANS would break callers that
+            # set conn.autocommit and leaks "idle in transaction" backends.
+            conn.rollback()
             return conn
         except Exception as e:  # noqa: BLE001 - want broad transient catch
             last_exc = e

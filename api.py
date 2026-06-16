@@ -793,6 +793,9 @@ def _is_conn_alive(conn) -> bool:
         with conn.cursor() as cur:
             cur.execute("SELECT 1")
             cur.fetchone()
+        # Clear the probe's implicit transaction so the borrowed connection
+        # starts idle, not INTRANS.
+        conn.rollback()
         return True
     except Exception:
         return False
@@ -843,13 +846,14 @@ def _release_db_conn(conn):
     if not conn:
         return
     if _db_pool:
-        # If the connection is closed or in a failed transaction state, discard it.
         broken = conn.closed != 0
         if not broken:
             try:
-                # status 2 == STATUS_IN_ERROR (aborted transaction)
                 import psycopg2.extensions as _ext
-                if conn.get_transaction_status() == _ext.TRANSACTION_STATUS_INERROR:
+                # End any open transaction (read endpoints leave the conn INTRANS)
+                # so it doesn't return to the pool "idle in transaction", which
+                # blocks VACUUM and gets reaped by idle_in_transaction_timeout.
+                if conn.get_transaction_status() != _ext.TRANSACTION_STATUS_IDLE:
                     conn.rollback()
             except Exception:
                 broken = True
