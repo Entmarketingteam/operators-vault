@@ -50,6 +50,7 @@ from structured_logger import get_logger, log_job_event
 _log = get_logger("api")
 
 # Import after dotenv
+import db_utils
 from deepgram_client import DeepgramAuthError, check_api_key
 from pipeline import _fetch_new, _get_unprocessed, _process_one, run_seed_and_process_all, upsert_seed_links
 
@@ -89,7 +90,7 @@ def _run_startup_migration() -> None:
             _log.warning("startup_migration_missing", extra={"path": str(migration_path)})
             continue
         try:
-            conn = psycopg2.connect(db_url)
+            conn = db_utils.connect(db_url)
             conn.autocommit = True
             with conn.cursor() as cur:
                 sql = migration_path.read_text(encoding="utf-8")
@@ -303,7 +304,7 @@ def _do_upsert_seed_links(rows: list[dict]) -> int:
     db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=500, detail="DATABASE_URL not set")
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     try:
         n = upsert_seed_links(cur, rows)
@@ -357,7 +358,7 @@ def _do_fetch_new() -> dict:
     if not os.environ.get("YOUTUBE_API_KEY"):
         raise HTTPException(status_code=500, detail="YOUTUBE_API_KEY not set")
     import psycopg2
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     try:
         n = _fetch_new(cur)
@@ -387,7 +388,7 @@ def _do_sync(job_id: str | None = None) -> dict:
     _log.info("Sync starting: fetch-new phase")
     if job_id:
         _update_job_heartbeat(job_id, progress="fetching new videos")
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     upserted = _fetch_new(cur)
     conn.commit()
@@ -463,7 +464,7 @@ def _do_process_new(job_id: str | None = None) -> dict:
         raise HTTPException(status_code=500, detail=f"Deepgram API key is invalid: {e}")
 
     import psycopg2
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     rows = _get_unprocessed(cur)
     cur.close()
@@ -542,7 +543,7 @@ def _do_extract_insights_from_transcripts(job_id: str | None = None, limit: int 
     if not db_url:
         raise HTTPException(status_code=500, detail="DATABASE_URL not set")
 
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     cur.execute("""
         SELECT v.video_id, v.podcast, t.raw_text
@@ -575,7 +576,7 @@ def _do_extract_insights_from_transcripts(job_id: str | None = None, limit: int 
             from people_extractor import extract_people_from_segments, link_insights_to_people
 
             db = _get_db_url()
-            conn2 = psycopg2.connect(db)
+            conn2 = db_utils.connect(db)
             cur2 = conn2.cursor()
 
             # Extract people from segments (already stored from prior transcription)
@@ -687,7 +688,7 @@ def run_migrate_phase1():
     for stmt in statements:
         # Each DDL statement gets its own fresh connection to avoid pooler SSL drops
         try:
-            conn = psycopg2.connect(db_url)
+            conn = db_utils.connect(db_url)
             conn.autocommit = True
             cur = conn.cursor()
             cur.execute(stmt + ";" if not stmt.rstrip().endswith(";") else stmt)
@@ -712,7 +713,7 @@ def health():
     else:
         try:
             import psycopg2
-            conn = psycopg2.connect(db_url, connect_timeout=5)
+            conn = db_utils.connect(db_url, connect_timeout=5)
             conn.close()
             checks["database"] = "ok"
         except Exception as e:
@@ -775,18 +776,35 @@ _db_pool = None
 
 
 def _get_db_url():
-    """Get DB URL and force port 6543 for Supabase pooler (Transaction Mode)."""
-    url = os.environ.get("DATABASE_URL")
-    if not url:
-        return None
-    if "pooler.supabase.com" in url and ":5432" in url:
-        # Port 5432 is Session mode (limited to 15-20); 6543 is Transaction mode (thousands)
-        url = url.replace(":5432", ":6543")
-    return url
+    """Get DB URL routed to the working Supabase pooler port.
+
+    The transaction pooler (6543) is currently dropping SSL on every connection
+    ("SSL connection has been closed unexpectedly"); the session pooler (5432) is
+    healthy. db_utils.resolve_db_url() rewrites 6543 -> 5432 for Supabase URLs.
+    """
+    return db_utils.resolve_db_url()
+
+
+def _is_conn_alive(conn) -> bool:
+    """Cheap liveness probe — pooler may have dropped the socket while pooled."""
+    if conn is None or conn.closed:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        return True
+    except Exception:
+        return False
 
 
 def _get_db_conn():
-    """Get a connection from the global pool."""
+    """Get a live connection from the global pool.
+
+    The session pooler (5432) can drop pooled connections server-side, so a
+    borrowed connection is validated before being handed out; a dead one is
+    discarded (not reused) and a fresh one is fetched.
+    """
     global _db_pool
     url = _get_db_url()
     if not url:
@@ -794,22 +812,48 @@ def _get_db_conn():
     if _db_pool is None:
         try:
             import psycopg2.pool
-            # min 2, max 20 connections
-            _db_pool = psycopg2.pool.ThreadedConnectionPool(2, 20, url)
+            # Session pooler (5432) caps near 15 concurrent connections; keep
+            # maxconn below that ceiling (see db_utils.DB_POOL_MAX).
+            _db_pool = psycopg2.pool.ThreadedConnectionPool(2, db_utils.DB_POOL_MAX, url)
         except Exception as e:
             _log.error("db_pool_init_failed", extra={"error": str(e)})
             raise HTTPException(status_code=500, detail="Database pool initialization failed")
     try:
-        return _db_pool.getconn()
+        for _ in range(db_utils.DB_POOL_MAX):
+            conn = _db_pool.getconn()
+            if _is_conn_alive(conn):
+                return conn
+            # Pooler closed this one — drop it (don't recycle) and try another.
+            _log.warning("db_conn_stale_discarded")
+            _db_pool.putconn(conn, close=True)
+        # Every pooled slot was stale — open one fresh, with retry on SSL drops.
+        return db_utils.connect(url)
     except Exception as e:
         _log.error("db_get_conn_failed", extra={"error": str(e)})
         raise HTTPException(status_code=503, detail="Database connection limit reached")
 
 
 def _release_db_conn(conn):
-    """Release a connection back to the pool."""
-    if _db_pool and conn:
-        _db_pool.putconn(conn)
+    """Return a connection to the pool, discarding it if it's dead.
+
+    A broken/SSL-dropped connection returned with a plain putconn() poisons the
+    pool — the next request gets the dead socket and also fails. Closing it on
+    release forces the pool to mint a fresh one instead.
+    """
+    if not conn:
+        return
+    if _db_pool:
+        # If the connection is closed or in a failed transaction state, discard it.
+        broken = conn.closed != 0
+        if not broken:
+            try:
+                # status 2 == STATUS_IN_ERROR (aborted transaction)
+                import psycopg2.extensions as _ext
+                if conn.get_transaction_status() == _ext.TRANSACTION_STATUS_INERROR:
+                    conn.rollback()
+            except Exception:
+                broken = True
+        _db_pool.putconn(conn, close=broken)
 
 
 # ---------------------------------------------------------------------------
@@ -1278,7 +1322,7 @@ def _get_person_by_slug(slug: str) -> dict:
     db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
         cur.execute("SELECT id, name, role_or_title, bio FROM people WHERE slug = %s", (slug,))
@@ -1351,7 +1395,7 @@ def _get_company_by_slug(slug: str) -> dict:
     db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
         cur.execute("SELECT id, name, type, description FROM companies WHERE slug = %s", (slug,))
@@ -1448,7 +1492,7 @@ def _search_visuals(
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     limit = min(limit, 100)
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
         cur.execute(
@@ -1493,7 +1537,7 @@ def _get_related_content(video_id: str, insight_id: str | None = None, limit: in
     db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
         if insight_id:
@@ -1573,7 +1617,7 @@ def get_visual_moments(
     db_url = _get_db_url()
     if not db_url:
         return {"moments": []}
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     try:
         cur.execute(
@@ -1608,7 +1652,7 @@ def get_visual_moments(
     db_url = _get_db_url()
     if not db_url:
         return {"moments": []}
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     try:
         cur.execute(
@@ -1659,7 +1703,7 @@ def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     limit = min(limit, 200)
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
         # Check which host columns exist (avoids DDL permission issues); use cache to skip repeated queries
@@ -1766,7 +1810,7 @@ def _get_speaker_by_slug(slug: str) -> dict:
     db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
         # Check which host columns exist
@@ -1996,7 +2040,7 @@ def _upsert_speaker(data: SpeakerUpsertRequest) -> dict:
     db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
         # Check which host columns exist
@@ -2114,7 +2158,7 @@ def admin_migrate_host_fields():
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     results = []
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     try:
         conn.autocommit = True
         cur = conn.cursor()
@@ -2175,7 +2219,7 @@ def chat(
 
     # Enrich podcast insights with speaker names via people join
     try:
-        conn = psycopg2.connect(db_url, connect_timeout=10)
+        conn = db_utils.connect(db_url, connect_timeout=10)
         cur = conn.cursor()
         insight_ids = [h["id"] for h in hits if h.get("type") != "newsletter_insight" and h.get("id")]
         if insight_ids:
@@ -2785,7 +2829,7 @@ def stats():
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
-        conn = psycopg2.connect(db_url, connect_timeout=15)
+        conn = db_utils.connect(db_url, connect_timeout=15)
         cur = conn.cursor()
         try:
             cur.execute(
@@ -3098,7 +3142,7 @@ def list_newsletters(
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
-        conn = psycopg2.connect(db_url, connect_timeout=15)
+        conn = db_utils.connect(db_url, connect_timeout=15)
         cur = conn.cursor()
         try:
             where = []
@@ -3145,7 +3189,7 @@ def get_newsletter(newsletter_id: str):
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
-        conn = psycopg2.connect(db_url, connect_timeout=10)
+        conn = db_utils.connect(db_url, connect_timeout=10)
         cur = conn.cursor()
         try:
             cur.execute(
@@ -3356,7 +3400,7 @@ def newsletter_sources():
         return {"sources": _NEWSLETTER_SOURCES_FALLBACK, "source": "fallback"}
     try:
         import psycopg2
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT slug, author, gmail_query, active, created_at FROM newsletter_source_configs WHERE active = TRUE ORDER BY created_at"
@@ -3387,7 +3431,7 @@ def newsletter_sources_create(req: NewsletterSourceCreateRequest):
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
         import psycopg2
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -3424,7 +3468,7 @@ def list_channels():
         return {"channels": [{"slug": k, "channel_handle": v, "display_name": k.replace("_", " ").title()} for k, v in DEFAULT_CHANNEL_HANDLES.items()], "source": "fallback"}
     try:
         import psycopg2
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT slug, channel_handle, display_name, active, created_at FROM channel_configs WHERE active = TRUE ORDER BY created_at"
@@ -3455,7 +3499,7 @@ def channels_create(req: ChannelCreateRequest):
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
         import psycopg2
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         with conn.cursor() as cur:
             cur.execute(
                 """
