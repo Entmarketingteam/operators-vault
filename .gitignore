@@ -19,3 +19,4 @@ wheels/
 .env*.local
 .claude/
 .worktrees/
+.env*
