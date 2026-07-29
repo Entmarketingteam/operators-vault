@@ -1,11 +1,14 @@
 """
 Transcribe audio via Deepgram with speaker diarization.
 Uses DEEPGRAM_API_KEY. punctuate=true, utterances=true for segments.
+Supports long-form audio (90+ min) via chunking + stitching with ffmpeg.
 """
 from __future__ import annotations
 
 import os
 import sys
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
