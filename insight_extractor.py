@@ -41,9 +41,16 @@ def _anthropic_message(system: str, user: str, model: str = "claude-haiku-4-5-20
                 )
                 resp = _json.loads(urllib.request.urlopen(req, timeout=120).read())
                 text = resp.get("text", "")
-                if text:
+                rc = resp.get("returncode")
+                if rc not in (0, None):
+                    # Proxy ran the CLI but it failed (usage limit, auth, crash). The
+                    # body still carries 200 + text, so this must be checked explicitly
+                    # or a non-answer gets parsed as "0 insights" and stored as success.
+                    proxy_err = RuntimeError(f"agent server returncode={rc}: {str(resp.get('stderr'))[:200]}")
+                elif text:
                     return text
-                proxy_err = RuntimeError("agent server returned empty text")
+                else:
+                    proxy_err = RuntimeError("agent server returned empty text")
             except Exception as e:
                 proxy_err = e
             if attempt < 4:
