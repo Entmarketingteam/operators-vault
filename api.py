@@ -902,6 +902,56 @@ def _extract_keywords(q: str) -> str:
     return " OR ".join(kw[:6])  # OR-joined for maximum recall in fallback
 
 
+def _normalize_ranks_by_type(hits: list[dict]) -> list[dict]:
+    """Add `rank_norm` (0-1) scaled within each result `type`.
+
+    ts_rank is only comparable inside a single corpus. Min-max scaling each type
+    independently lets "best newsletter hit" compete with "best video hit" instead
+    of letting one corpus's absolute score range win by construction.
+
+    A single hit, or a group where every score ties, normalizes to 1.0 — with one
+    data point there is no evidence it is a weak match, so it should not be
+    penalised against a group that happens to have spread.
+    """
+    by_type: dict[str, list[dict]] = {}
+    for h in hits:
+        by_type.setdefault(h.get("type") or "unknown", []).append(h)
+
+    for group in by_type.values():
+        ranks = [float(h.get("rank") or 0) for h in group]
+        lo, hi = min(ranks), max(ranks)
+        span = hi - lo
+        for h, r in zip(group, ranks):
+            h["rank_norm"] = 1.0 if span <= 0 else (r - lo) / span
+    return hits
+
+
+# Share of guide/chat context reserved for newsletter insights. Newsletters and
+# podcasts cover different ground — the CAC-ceiling and OPEX-floor material lives
+# almost entirely in newsletters — so the context builder guarantees both are
+# represented rather than trusting relevance ranking to mix them.
+_NEWSLETTER_CONTEXT_SHARE = 0.4
+
+
+def _apply_source_quota(hits: list[dict], limit: int, newsletter_share: float = _NEWSLETTER_CONTEXT_SHARE) -> list[dict]:
+    """Interleave newsletter and video/moment hits so neither can crowd the other out.
+
+    Whichever side is short of its quota yields its unused slots to the other, so a
+    topic genuinely covered by only one corpus still fills the full context window.
+    """
+    newsletters = [h for h in hits if h.get("type") == "newsletter_insight"]
+    others = [h for h in hits if h.get("type") != "newsletter_insight"]
+
+    want_nl = min(len(newsletters), int(round(limit * newsletter_share)))
+    want_other = min(len(others), limit - want_nl)
+    # Reclaim slots the other side could not fill.
+    want_nl = min(len(newsletters), limit - want_other)
+
+    picked = newsletters[:want_nl] + others[:want_other]
+    picked.sort(key=lambda h: float(h.get("rank_norm") or h.get("rank") or 0), reverse=True)
+    return picked
+
+
 def _search_postgres(
     q: str,
     podcast: str | None = None,
@@ -1076,7 +1126,11 @@ def _search_postgres(
             cur = conn.cursor()
             def _do_newsletter_search(query_str: str) -> list[dict]:
                 q_clean = query_str.strip()
-                nl_where = ["to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')) @@ websearch_to_tsquery('english', %s)"]
+                # ni.fts is a stored, weighted column mirroring insights.fts (migration
+                # 20260801_newsletter_insights_fts.sql). Before it existed this ranked an
+                # inline UNWEIGHTED to_tsvector against the video side's weighted one, and
+                # newsletters lost essentially every slot in the merge sort below.
+                nl_where = ["ni.fts @@ websearch_to_tsquery('english', %s)"]
                 nl_params: list = [q_clean, q_clean]
                 if podcast:
                     nl_where.append("ni.source = %s")
@@ -1089,7 +1143,7 @@ def _search_postgres(
                     f"""
                     SELECT ni.id, ni.source, ni.category, ni.title, ni.description,
                            n.subject, n.author, n.published_at,
-                           ts_rank(to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')), websearch_to_tsquery('english', %s)) AS rank,
+                           ts_rank(ni.fts, websearch_to_tsquery('english', %s)) AS rank,
                            ni.newsletter_id::text
                     FROM newsletter_insights ni
                     JOIN newsletters n ON n.id = ni.newsletter_id
@@ -1129,11 +1183,18 @@ def _search_postgres(
         finally:
             if conn: _release_db_conn(conn)
 
-    # Final Rank-based sort and limit for combined results
+    # Final sort. Rank must be normalized per corpus first: raw ts_rank values are
+    # only meaningful *within* one result set. Video insights, transcript moments and
+    # newsletter insights are three separate corpora with different document lengths
+    # and term distributions, so their absolute scores are not comparable even now
+    # that all three use weighted tsvectors. Sorting on the raw value is what buried
+    # newsletters (98 video / 2 newsletter on a 100-hit CAC query) and made
+    # /topic-guide and /chat read as podcast-only.
     if hits:
-        hits.sort(key=lambda h: float(h.get("rank") or 0), reverse=True)
+        hits = _normalize_ranks_by_type(hits)
+        hits.sort(key=lambda h: float(h.get("rank_norm") or 0), reverse=True)
         hits = hits[:limit]
-        
+
     return {"query": q or "(all)", "total": len(hits), "hits": hits}
 
 
@@ -2227,9 +2288,10 @@ def chat(
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
 
-    # Search both podcast insights and newsletter insights
-    search_result = _search_postgres(msg, limit=body.context_limit, type_="all")
-    hits = search_result.get("hits") or []
+    # Search both podcast insights and newsletter insights. Over-fetch then quota so
+    # the answer draws on both corpora — see _apply_source_quota.
+    search_result = _search_postgres(msg, limit=body.context_limit * 3, type_="all")
+    hits = _apply_source_quota(search_result.get("hits") or [], body.context_limit)
 
     # If no hits with full question, retry with OR-joined extracted keywords
     # This handles conversational phrasing and acronyms like BFCM that need
@@ -2237,8 +2299,8 @@ def chat(
     if not hits:
         kw_query = _extract_keywords(msg)
         if kw_query and kw_query.replace(" OR ", " ").strip() != msg.lower().strip():
-            search_result = _search_postgres(kw_query, limit=body.context_limit, type_="all")
-            hits = search_result.get("hits") or []
+            search_result = _search_postgres(kw_query, limit=body.context_limit * 3, type_="all")
+            hits = _apply_source_quota(search_result.get("hits") or [], body.context_limit)
 
     # Enrich podcast insights with speaker names via people join
     try:
@@ -3340,16 +3402,19 @@ def topic_guide(body: TopicGuideRequest):
         raise HTTPException(status_code=400, detail="topic required")
 
     # Search all content types for this topic
-    results = _search_postgres(topic, limit=30, type_="all")
-    hits = results.get("hits") or []
+    # Over-fetch, then quota down to 30. Fetching exactly 30 would leave nothing to
+    # rebalance if one corpus dominated the top of the ranking — which is exactly how
+    # guides ended up citing podcast timestamps and nothing else.
+    _GUIDE_CONTEXT = 30
+    results = _search_postgres(topic, limit=_GUIDE_CONTEXT * 3, type_="all")
+    hits = _apply_source_quota(results.get("hits") or [], _GUIDE_CONTEXT)
 
-    # Also search newsletter insights directly (they're included in "all" but let's be thorough)
     if not hits:
         # Retry with extracted keywords for broader matching (similar to /chat)
         kw_query = _extract_keywords(topic)
         if kw_query and kw_query.replace(" OR ", " ").strip() != topic.lower().strip():
-            results = _search_postgres(kw_query, limit=30, type_="all")
-            hits = results.get("hits", [])
+            results = _search_postgres(kw_query, limit=_GUIDE_CONTEXT * 3, type_="all")
+            hits = _apply_source_quota(results.get("hits") or [], _GUIDE_CONTEXT)
 
     if not hits:
         raise HTTPException(status_code=404, detail=f"No content found on topic: {topic}")
