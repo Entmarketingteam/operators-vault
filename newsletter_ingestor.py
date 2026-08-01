@@ -10,7 +10,6 @@ from __future__ import annotations
 import html
 import os
 import re
-import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -167,25 +166,23 @@ def extract_newsletter_insights(text: str) -> list[dict[str, str]]:
 
 # ── Supabase storage ───────────────────────────────────────────────────────────
 
-_pool = None
-_pool_lock = threading.Lock()
-
-def _get_pool():
-    global _pool
-    if _pool is None:
-        with _pool_lock:
-            if _pool is None:
-                import psycopg2.pool
-                url = db_utils.resolve_db_url() or ""
-                _pool = psycopg2.pool.ThreadedConnectionPool(2, 10, url, sslmode="require")
-    return _pool
-
-
 def _db_conn():
-    """Return a connection from the pool (caller must call pool.putconn when done)."""
-    import psycopg2
-    url = db_utils.resolve_db_url() or ""
-    return db_utils.connect(url, sslmode="require")
+    """Open a fresh, probed connection. Caller closes it.
+
+    There used to be a ThreadedConnectionPool here. It was the direct cause of the
+    newsletter sync dropping ~68% of issues: the Supabase pooler closes idle
+    connections, `pool.getconn()` handed those dead sockets straight to callers,
+    and the ingest POST died with "server closed the connection unexpectedly"
+    (n8n execution 161983, HTTP 500). n8n then aborted the whole daily run, and
+    because the sync window was only `newer_than:2d`, every issue after the
+    failure point was skipped permanently.
+
+    `db_utils.connect()` exists precisely to solve this — it opens a fresh
+    connection per attempt, validates it with SELECT 1, and retries transient
+    pooler drops. Ingest volume is a handful of newsletters per day, so pooling
+    bought nothing and cost correctness.
+    """
+    return db_utils.connect(sslmode="require")
 
 
 def upsert_newsletter(
@@ -200,8 +197,7 @@ def upsert_newsletter(
     Insert newsletter row. Returns (newsletter_id, is_new).
     Skips if already processed.
     """
-    pool = _get_pool()
-    conn = pool.getconn()
+    conn = _db_conn()
     try:
         with conn.cursor() as cur:
             # Check existing
@@ -231,13 +227,12 @@ def upsert_newsletter(
             conn.commit()
             return nl_id, True
     finally:
-        pool.putconn(conn)
+        conn.close()
 
 
 def store_newsletter_insights(newsletter_id: str, source: str, insights: list[dict]) -> int:
     """Insert extracted insights and mark newsletter processed. Returns count inserted."""
-    pool = _get_pool()
-    conn = pool.getconn()
+    conn = _db_conn()
     try:
         with conn.cursor() as cur:
             # Delete old insights for this newsletter to allow clean re-runs
@@ -263,7 +258,7 @@ def store_newsletter_insights(newsletter_id: str, source: str, insights: list[di
             conn.commit()
         return len(insights)
     finally:
-        pool.putconn(conn)
+        conn.close()
 
 
 # ── Main entry point ───────────────────────────────────────────────────────────

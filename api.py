@@ -122,7 +122,26 @@ def _on_startup():
         from newsletter_ingestor import _db_conn
         conn = _db_conn()
         with conn.cursor() as cur:
-            cur.execute("SELECT id, source, body_text FROM newsletters WHERE processed = FALSE AND body_text IS NOT NULL LIMIT 500")
+            # Re-queue on absence of insights, not on `processed`. That flag drifts in
+            # both directions (measured 2026-08-01: 45 rows processed=TRUE with zero
+            # insights, 679 rows processed=FALSE that already had them). Selecting on
+            # the flag both misses real gaps and re-extracts rows that are already
+            # done — and store_newsletter_insights() DELETEs before re-inserting, so a
+            # needless re-run destroys good insights and burns Claude calls.
+            cur.execute(
+                """
+                SELECT n.id, n.source, n.body_text
+                FROM newsletters n
+                WHERE n.body_text IS NOT NULL
+                  AND length(n.body_text) >= 100
+                  AND NOT n.promo_only
+                  AND NOT EXISTS (
+                      SELECT 1 FROM newsletter_insights ni WHERE ni.newsletter_id = n.id
+                  )
+                ORDER BY n.published_at DESC
+                LIMIT 500
+                """
+            )
             rows = cur.fetchall()
         conn.close()
         for row in rows:
@@ -3115,8 +3134,21 @@ def process_newsletters(limit: int = 50):
     conn = _db_conn()
     try:
         with conn.cursor() as cur:
+            # Same anti-join as the startup re-queue: `processed` is not a reliable
+            # signal of whether insights actually exist. See _on_startup().
             cur.execute(
-                "SELECT id, source, body_text FROM newsletters WHERE processed = FALSE AND body_text IS NOT NULL ORDER BY created_at ASC LIMIT %s",
+                """
+                SELECT n.id, n.source, n.body_text
+                FROM newsletters n
+                WHERE n.body_text IS NOT NULL
+                  AND length(n.body_text) >= 100
+                  AND NOT n.promo_only
+                  AND NOT EXISTS (
+                      SELECT 1 FROM newsletter_insights ni WHERE ni.newsletter_id = n.id
+                  )
+                ORDER BY n.published_at DESC
+                LIMIT %s
+                """,
                 (limit,)
             )
             rows = cur.fetchall()
