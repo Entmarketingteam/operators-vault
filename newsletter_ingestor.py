@@ -3,7 +3,8 @@ Newsletter ingestion pipeline for Operators Vault.
 Accepts email content (from n8n or direct call), strips HTML, extracts insights via Claude,
 stores in Supabase newsletters + newsletter_insights tables.
 
-Sources: nik_sharma | taylor_holiday | matt_bertulli | chase_dimond | operators_newsletter
+Sources are configured in the newsletter_source_configs table; the dict below is
+only a fallback for when that table is unreachable. Keep the two in sync.
 """
 from __future__ import annotations
 
@@ -43,6 +44,14 @@ _NEWSLETTER_SOURCES_FALLBACK = {
         "author": "Operators Newsletter",
         "label_id": "Label_4710583513291043383",
         "senders": ["news@operatorscontent.com"],
+    },
+    "jordan_west": {
+        "author": "Jordan West (Social Commerce Club)",
+        "senders": ["jordanwestnewsletter@mail.beehiiv.com"],
+    },
+    "chew_on_this": {
+        "author": "Chew On This (Obvi)",
+        "senders": ["chew-on-this@mail.beehiiv.com"],
     },
 }
 
@@ -230,6 +239,24 @@ def upsert_newsletter(
         conn.close()
 
 
+def mark_promo_only(newsletter_id: str) -> None:
+    """Flag an issue as promo: keep the body, store no insights, stop re-queueing it.
+
+    processed=TRUE as well, so the flag stays consistent with "extraction is done
+    with this row" — the re-queue anti-join filters on promo_only directly.
+    """
+    conn = _db_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE newsletters SET promo_only = TRUE, processed = TRUE WHERE id = %s",
+                (newsletter_id,),
+            )
+            conn.commit()
+    finally:
+        conn.close()
+
+
 def store_newsletter_insights(newsletter_id: str, source: str, insights: list[dict]) -> int:
     """Insert extracted insights and mark newsletter processed. Returns count inserted."""
     conn = _db_conn()
@@ -261,6 +288,87 @@ def store_newsletter_insights(newsletter_id: str, source: str, insights: list[di
         conn.close()
 
 
+# ── Promo gate ─────────────────────────────────────────────────────────────────
+
+# Phrases that only ever appear in a pure promo send. Used as a free fast-path so
+# obvious webinar/event blasts never reach the classifier or the extractor.
+_PROMO_MARKERS = (
+    "register here", "register now", "save your seat", "reserve your spot",
+    "you're invited", "you are invited", "rsvp", "join us live", "going live at",
+    "book a call", "book your", "apply now", "limited spots", "sign up here",
+    "watch the replay", "join the waitlist",
+)
+
+# Below this, an issue is too short to carry an operator idea; combined with a
+# promo marker it is a registration blast, not a newsletter.
+_PROMO_LENGTH_CEILING = 1500
+
+
+def _sample_body(text: str, budget: int = 5000) -> str:
+    """Head + middle + tail sample of an issue.
+
+    Sending only the first N chars misclassifies sponsor-funded newsletters: the
+    sponsor block and CTA sit at the top, and the substance sits below it. Chew On
+    This's marginal-CAC issue was judged PROMO on its first 4000 chars because the
+    "Book your free Cash Dash" block came before the actual framework.
+    """
+    if len(text) <= budget:
+        return text
+    part = budget // 3
+    mid = (len(text) - part) // 2
+    return (
+        text[:part]
+        + "\n\n[...]\n\n" + text[mid:mid + part]
+        + "\n\n[...]\n\n" + text[-part:]
+    )
+
+
+def is_promo_only(text: str, subject: str = "") -> bool:
+    """True if this issue is an ad for an event/offer with no operator substance.
+
+    Two of the seven sources (Jordan West, Chew On This) run 30-50% promo sends.
+    Without a gate those become "insights" like "Register for our Aug 5 workshop",
+    which then compete for slots in Discover and in guide context. Chase Dimond
+    already demonstrates the failure mode at scale.
+
+    A zero-insight extraction result is NOT equivalent: it costs a full multi-chunk
+    Claude pass per issue, and it cannot distinguish "promo" from "extraction
+    failed", so the two get silently conflated in coverage metrics.
+    """
+    blob = f"{subject}\n{text}".lower()
+    has_marker = any(m in blob for m in _PROMO_MARKERS)
+
+    # Short + promo marker = registration blast. Decided without an LLM call.
+    if has_marker and len(text) < _PROMO_LENGTH_CEILING:
+        return True
+    # Long issues can carry a sponsor read AND real substance, so length alone is
+    # never disqualifying; only ask the model when a marker actually fired.
+    if not has_marker:
+        return False
+
+    from insight_extractor import _anthropic_message
+    system = "You classify DTC/ecommerce newsletter issues. Answer with exactly one word."
+    user = (
+        "Does this newsletter issue contain substantive operator insight — frameworks, "
+        "numbers, tactics, case studies, or a point of view a practitioner could act on?\n\n"
+        "Answer SUBSTANTIVE if it does. Answer PROMO ONLY if the entire issue is an "
+        "advertisement for an event, webinar, product, job, or service with no takeaway "
+        "of its own.\n\n"
+        "Important: most of these newsletters are sponsor-funded. A sponsor read, a "
+        "webinar invitation, or a 'book a call' CTA sitting alongside real content does "
+        "NOT make an issue PROMO. Judge the issue by its substantive portion, not by the "
+        "presence of a call to action.\n\n"
+        f"SUBJECT: {subject}\n\nBODY:\n{_sample_body(text)}"
+    )
+    try:
+        verdict = (_anthropic_message(system, user) or "").strip().upper()
+    except Exception:
+        # Never drop an issue because the classifier was unavailable — failing open
+        # costs a few junk insights; failing closed silently loses real content.
+        return False
+    return verdict.startswith("PROMO")
+
+
 # ── Main entry point ───────────────────────────────────────────────────────────
 
 def ingest_email(
@@ -288,7 +396,19 @@ def ingest_email(
     newsletter_id, is_new = upsert_newsletter(email_id, source, author, subject, published_at, body_text)
     # is_new means it was either truly new or it was updated with longer body.
     # For backfills, we want to proceed regardless if processed=False.
-    
+
+    # Promo gate — before extraction, so a registration blast never costs a
+    # multi-chunk Claude pass or lands junk insights in search.
+    if is_promo_only(body_text, subject):
+        mark_promo_only(newsletter_id)
+        return {
+            "email_id": email_id,
+            "newsletter_id": newsletter_id,
+            "is_new": is_new,
+            "status": "promo_only",
+            "insights_count": 0,
+        }
+
     # Extract insights from all chunks
     all_insights: list[dict] = []
     chunks = chunk_text(body_text)

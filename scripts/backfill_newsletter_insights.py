@@ -29,7 +29,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent.parent))
 
 import db_utils
-from newsletter_ingestor import chunk_text, extract_newsletter_insights, store_newsletter_insights
+from newsletter_ingestor import (
+    chunk_text,
+    extract_newsletter_insights,
+    is_promo_only,
+    mark_promo_only,
+    store_newsletter_insights,
+)
 
 # Matches _NEWSLETTER_WORKERS in api.py. The agent-server proxy is the bottleneck,
 # not the DB — the session pooler tolerates far more than this (db_utils.DB_POOL_MAX).
@@ -70,6 +76,11 @@ def process_one(row: tuple) -> tuple[str, int, str | None]:
     """Extract + store one newsletter. Returns (subject, insight_count, error)."""
     nl_id, source, subject, body_text = str(row[0]), row[1], row[2] or "", row[3]
     try:
+        # Gate before extraction so a registration blast costs one small classifier
+        # call instead of a full multi-chunk pass, and lands no junk insights.
+        if is_promo_only(body_text, subject):
+            mark_promo_only(nl_id)
+            return subject, 0, None  # counted as handled, not failed
         insights: list[dict] = []
         for chunk in chunk_text(body_text):
             got = extract_newsletter_insights(chunk)
@@ -112,7 +123,7 @@ def main() -> int:
         print(f"\nre-run with --apply to process all {len(rows)}")
         return 0
 
-    ok = failed = total_insights = 0
+    ok = failed = promo = total_insights = 0
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         futures = {pool.submit(process_one, r): r for r in rows}
         for i, fut in enumerate(as_completed(futures), 1):
@@ -120,12 +131,16 @@ def main() -> int:
             if err:
                 failed += 1
                 _log(f"[{i}/{len(rows)}] FAIL {subject[:55]} — {err}")
+            elif count == 0:
+                promo += 1
+                _log(f"[{i}/{len(rows)}] promo {subject[:55]} — skipped, no extraction")
             else:
                 ok += 1
                 total_insights += count
                 _log(f"[{i}/{len(rows)}] ok   {subject[:55]} — {count} insights")
 
-    print(f"\ndone: {ok} extracted ({total_insights} insights), {failed} failed")
+    print(f"\ndone: {ok} extracted ({total_insights} insights), "
+          f"{promo} promo-skipped, {failed} failed")
     return 0 if failed == 0 else 1
 
 

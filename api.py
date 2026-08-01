@@ -3016,7 +3016,10 @@ def _newsletter_extract_worker():
     set so the row stops blocking the queue and is visible to ops.
     """
     import psycopg2
-    from newsletter_ingestor import extract_newsletter_insights, store_newsletter_insights, chunk_text, _db_conn
+    from newsletter_ingestor import (
+        extract_newsletter_insights, store_newsletter_insights, chunk_text, _db_conn,
+        is_promo_only, mark_promo_only,
+    )
     while True:
         try:
             newsletter_id, source, body_text = _newsletter_extract_queue.get(timeout=5)
@@ -3026,7 +3029,7 @@ def _newsletter_extract_worker():
                 conn = _db_conn()
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT processed, COALESCE(retry_count, 0) FROM newsletters WHERE id = %s",
+                        "SELECT processed, COALESCE(retry_count, 0), subject FROM newsletters WHERE id = %s",
                         (newsletter_id,),
                     )
                     row = cur.fetchone()
@@ -3035,6 +3038,16 @@ def _newsletter_extract_worker():
                     _newsletter_extract_queue.task_done()
                     continue
                 retry_count = int(row[1] or 0)
+                subject = row[2] or ""
+                # Promo gate lives here rather than in the endpoint so it covers both
+                # the live n8n path and every re-queue, and so the HTTP response is
+                # not held open for a classifier call.
+                if is_promo_only(body_text, subject):
+                    mark_promo_only(newsletter_id)
+                    _log.info("newsletter_promo_skipped",
+                              extra={"newsletter_id": newsletter_id, "subject": subject[:80]})
+                    _newsletter_extract_queue.task_done()
+                    continue
                 try:
                     chunks = chunk_text(body_text)
                     all_insights = []
@@ -3146,16 +3159,28 @@ def ingest_newsletter(req: NewsletterIngestRequest):
         strip_html, clean_email_text, upsert_newsletter
     )
 
-    source = req.source
-    if (not source or source == "unknown") and req.sender_email:
-        inferred = infer_source_from_sender(req.sender_email)
-        if inferred:
-            source = inferred
+    # The From header is authoritative; req.source is only a hint. This used to be
+    # the other way round — inference ran only when the caller sent nothing — and
+    # because n8n always sent a source, the inference never fired. n8n's Parse Email
+    # Body node resolved that source with `$('Source Config').first()`, which always
+    # returns config item #1, so every issue from 2026-05-09 on was filed as
+    # nik_sharma: Taylor Holiday's and Matt Bertulli's issues included. Deriving it
+    # here, server-side, kills the bug class rather than patching the caller.
+    source = infer_source_from_sender(req.sender_email) if req.sender_email else None
+    if not source:
+        if req.source in NEWSLETTER_SOURCES:
+            source = req.source
+        else:
+            # Never guess. Store it, flag it, and let the staleness/ops check surface
+            # it — dropping mail because a sender is unrecognised loses it silently.
+            source = "unclassified"
+            _log.warning(
+                "newsletter_unclassified_sender",
+                extra={"sender": req.sender_email, "claimed_source": req.source, "subject": req.subject},
+            )
 
-    if source not in NEWSLETTER_SOURCES and source != "unknown":
-        raise HTTPException(status_code=400, detail=f"Unknown source '{source}'. Valid: {list(NEWSLETTER_SOURCES.keys())}")
-
-    author = req.author or (NEWSLETTER_SOURCES.get(source, {}).get("author", source))
+    # Author follows the derived source, not the caller's claim, for the same reason.
+    author = NEWSLETTER_SOURCES.get(source, {}).get("author") or req.author or source
 
     try:
         # Clean body
@@ -3181,6 +3206,78 @@ def ingest_newsletter(req: NewsletterIngestRequest):
         return {"email_id": req.email_id, "newsletter_id": newsletter_id, "status": "queued", "insights_count": 0}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {e!s}")
+
+
+@app.get("/newsletter-health")
+def newsletter_health(stale_days: int = 10):
+    """Report per-source freshness and extraction health.
+
+    This exists because the newsletter layer failed silently for three months and
+    nobody was paged. Two distinct failures have to be caught, and only one of them
+    looks like an error:
+
+      * a source stops arriving (sync/auth/filter broken)
+      * issues keep arriving but produce zero insights (extraction broken) — the
+        org's dominant silent-failure signature, a green run with 0 rows
+
+    Returns ok=false when either fires, so a caller can alert on the flag without
+    re-deriving the logic. `stale_days` is generous by default: the least frequent
+    source (Taylor Holiday) can legitimately go a week between sends.
+    """
+    conn = None
+    try:
+        conn = _get_db_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            -- count(DISTINCT n.id): the join to newsletter_insights fans out one row
+            -- per insight, so a plain count(n.id) reports insight rows as if they
+            -- were issues and makes the arriving-but-not-extracting check unable to
+            -- fire. promo_only issues are excluded from the extraction check because
+            -- having zero insights is the correct outcome for them.
+            SELECT c.slug,
+                   max(n.published_at) AS latest,
+                   count(DISTINCT n.id) FILTER (
+                       WHERE n.published_at > now() - interval '30 days'
+                         AND NOT n.promo_only
+                   ) AS issues_30d,
+                   count(ni.id) FILTER (
+                       WHERE n.published_at > now() - interval '30 days'
+                   ) AS insights_30d
+            FROM newsletter_source_configs c
+            LEFT JOIN newsletters n ON n.source = c.slug
+            LEFT JOIN newsletter_insights ni ON ni.newsletter_id = n.id
+            WHERE c.active
+            GROUP BY c.slug
+            ORDER BY c.slug
+            """
+        )
+        sources, problems = [], []
+        for slug, latest, issues_30d, insights_30d in cur.fetchall():
+            days = (datetime.now(timezone.utc) - latest).days if latest else None
+            stale = days is None or days > stale_days
+            # Arriving but not extracting: the failure that ran unnoticed from May.
+            dead_extraction = bool(issues_30d) and not insights_30d
+            if stale:
+                problems.append(f"{slug}: no issue in {days if days is not None else 'ever'} days")
+            if dead_extraction:
+                problems.append(f"{slug}: {issues_30d} issues in 30d but 0 insights extracted")
+            sources.append({
+                "source": slug,
+                "latest": latest.isoformat() if latest else None,
+                "days_since_latest": days,
+                "issues_30d": issues_30d,
+                "insights_30d": insights_30d,
+                "stale": stale,
+                "extraction_dead": dead_extraction,
+            })
+        return {"ok": not problems, "problems": problems, "sources": sources}
+    except Exception as e:
+        _log.error("newsletter_health_failed", extra={"error": str(e)})
+        raise HTTPException(status_code=500, detail="newsletter health check failed")
+    finally:
+        if conn:
+            _release_db_conn(conn)
 
 
 @app.post("/process-newsletters")
