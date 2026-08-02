@@ -84,6 +84,7 @@ def _run_startup_migration() -> None:
         "add_speaker_profiles.sql",
         "add_host_fields.sql",
         "migrate_newsletter_retry.sql",
+        "add_topic_guides.sql",
     ):
         migration_path = _root / "sql" / migration_name
         if not migration_path.exists():
@@ -2432,6 +2433,167 @@ Use the provided vault excerpts as your primary source. When excerpts are releva
         raise HTTPException(status_code=500, detail=f"Chat failed: {e!s}")
 
 
+class TopicGuideRequest(BaseModel):
+    topic: str
+    limit: int = 30
+
+
+@app.post("/topic-guide")
+def topic_guide(
+    body: TopicGuideRequest,
+):
+    """Generate an AI-powered topic guide/playbook synthesized from both podcasts and newsletters."""
+    topic = (body.topic or "").strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic required")
+    db_url = _get_db_url()
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
+
+    # Search database for insights and newsletter insights
+    search_result = _search_postgres(topic, limit=body.limit, type_="all")
+    hits = search_result.get("hits") or []
+
+    # If no hits, fallback to OR keyword query
+    if not hits:
+        kw_query = _extract_keywords(topic)
+        if kw_query and kw_query.replace(" OR ", " ").strip() != topic.lower().strip():
+            search_result = _search_postgres(kw_query, limit=body.limit, type_="all")
+            hits = search_result.get("hits") or []
+
+    if not hits:
+        raise HTTPException(status_code=404, detail="No matching insights found in the vault for this topic.")
+
+    # Enrich with speaker info
+    try:
+        conn = db_utils.connect(db_url, connect_timeout=10)
+        cur = conn.cursor()
+        insight_ids = [h["id"] for h in hits if h.get("type") != "newsletter_insight" and h.get("id")]
+        if insight_ids:
+            cur.execute(
+                """
+                SELECT ip.insight_id::text, STRING_AGG(p.name, ', ') as speakers
+                FROM insight_people ip JOIN people p ON p.id = ip.person_id
+                WHERE ip.insight_id::text = ANY(%s)
+                GROUP BY ip.insight_id
+                """,
+                (insight_ids,),
+            )
+            speaker_map = {row[0]: row[1] for row in cur.fetchall()}
+            for h in hits:
+                if h.get("id") in speaker_map:
+                    h["speaker_name"] = speaker_map[h["id"]]
+        cur.close()
+        conn.close()
+    except Exception:
+        pass
+
+    # Sort and take top N
+    hits = sorted(hits, key=lambda h: float(h.get("rank") or 0), reverse=True)[:body.limit]
+
+    context_parts = []
+    for h in hits:
+        h_type = h.get("type", "")
+        if h_type == "newsletter_insight":
+            author = h.get("author") or h.get("source") or "Newsletter"
+            title = h.get("headline_title") or h.get("title") or ""
+            desc = h.get("headline_description") or h.get("description") or ""
+            text = f"{title}. {desc}" if desc else title
+            context_parts.append(f"[Newsletter — {author}] {text}")
+        else:
+            pod = (h.get("podcast") or "").replace("_", " ").title()
+            speaker = h.get("speaker_name") or h.get("speaker") or ""
+            start = h.get("start_time_sec")
+            t = h.get("headline_title") or h.get("headline_description") or h.get("headline") or h.get("text") or ""
+            if not pod:
+                pod = "Operators Podcast"
+            label = f"{pod}" + (f" — {speaker}" if speaker else "") + (f" @ {int(start)}s" if start is not None else "")
+            context_parts.append(f"[{label}] {t}")
+
+    context = "\n\n".join(context_parts)
+
+    system = """You are the ECOM Operators Vault Playbook Writer — a world-class ecommerce research director who writes comprehensive, durable, and highly detailed operational playbooks synthesized from hundreds of hours of interviews and newsletters from the world's best 7-, 8-, and 9-figure operators.
+
+Your knowledge base includes:
+- Podcast insights from 9 Operators, Marketing Operators, Finance Operators, and TITANS
+- Newsletters from Nik Sharma, Taylor Holiday (CTC), Matt Bertulli, and Chase Diamond
+- Definitive books like "Ramping Your Brand" by James Richardson, Ph.D.
+
+Your goal is to write a highly professional, exhaustive, "durable" Topic Guide in Markdown format. A durable guide is NOT just a collection of random snippets or a high-level summary; it is a structured, action-oriented masterclass on the requested topic.
+
+Use the provided vault excerpts as your primary evidence. Integrate and synthesize them into cohesive, themed sections.
+
+Each playbook must have:
+1. **Title**: A sharp, high-signal title (e.g., "# The Definitive Guide to Creative Testing Loops")
+2. **Executive Summary**: A concise, first-principles synthesis of the operators' consensus on the topic.
+3. **Core Pillars / Frameworks**: Organize the knowledge into 2 to 4 distinct operational pillars (e.g., "Pillar 1: The Gifting-to-Paid Media Pipeline", "Pillar 2: LTV and Unit Economics of Creative Refreshes"). For each pillar, write highly actionable, step-by-step instructions. Include numbers, benchmarks, and concrete steps from the context wherever possible.
+4. **Operator Perspectives & Debates**: Highlight contrarian views, nuances, or debates among the operators.
+5. **Citations & Sources**: Ground your statements by citing specific operators and sources from the excerpts.
+
+Rules of Voice and Tone:
+- Professional, direct, authoritative, and completely void of fluff or generic advice.
+- Speak like an elite eCommerce CFO, CMO, and COO combined.
+- Use exact terms (e.g., MER, nCAC, contribution margin dollars, blended ROAS, etc.) with real numerical thresholds if mentioned in the excerpts.
+- Avoid phrases like "In this guide, we will explore..." or "To summarize...". Jump straight into the high-signal content.
+"""
+
+    user_content = f"Generate a comprehensive, durable playbook for this Topic: '{topic}'\n\nHere are the relevant vault excerpts and insights:\n\n{context}"
+
+    agent_key = os.environ.get("AGENT_SERVER_API_KEY", "")
+    try:
+        headers = {"Content-Type": "application/json"}
+        if agent_key:
+            headers["Authorization"] = f"Bearer {agent_key}"
+        full_prompt = f"System: {system}\n\n{user_content}"
+        agent_res = requests.post(
+            "https://ent-agent-server-production.up.railway.app/complete",
+            json={"prompt": full_prompt, "max_tokens": 3000},
+            headers=headers,
+            timeout=120,
+        )
+        agent_res.raise_for_status()
+        data = agent_res.json()
+        content = data.get("text") or data.get("completion") or data.get("content") or ""
+        
+        # Format list of citations/sources for the frontend UI
+        sources = []
+        seen_ids = set()
+        for h in hits:
+            hid = str(h.get("id") or "")
+            if not hid or hid in seen_ids:
+                continue
+            seen_ids.add(hid)
+            h_type = h.get("type", "")
+            if h_type == "newsletter_insight":
+                sources.append({
+                    "id": hid,
+                    "title": h.get("title") or h.get("headline_title") or "",
+                    "description": h.get("description") or h.get("headline_description") or "",
+                    "source": "Newsletter",
+                    "author": h.get("author") or h.get("source") or "",
+                    "category": h.get("category"),
+                })
+            else:
+                sources.append({
+                    "id": hid,
+                    "title": h.get("headline_title") or h.get("title") or "",
+                    "description": h.get("headline_description") or h.get("description") or "",
+                    "source": (h.get("podcast") or "").replace("_", " ").title(),
+                    "author": h.get("speaker_name") or h.get("speaker") or "",
+                    "podcast": h.get("podcast"),
+                    "category": h.get("category"),
+                })
+
+        return {
+            "topic": topic,
+            "content": content,
+            "citations_count": len(hits),
+            "sources": sources
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Topic guide generation failed: {e!s}")
+
+
 @app.get("/config")
 def config():
     """Public config for frontends (API base URL, Supabase URL + anon key). Set in Railway/Vercel env."""
@@ -3492,19 +3654,52 @@ def topic_guide(body: TopicGuideRequest):
     """
     Generate a topic guide by searching the vault for the given topic,
     then compiling insights into a structured markdown guide via Haiku.
+    Checks DB cache (topic_guides) first to enable instant, zero-latency reloads.
     Public — no auth required.
     """
     topic = (body.topic or "").strip()
     if not topic:
         raise HTTPException(status_code=400, detail="topic required")
+    db_url = _get_db_url()
+    if not db_url:
+        raise HTTPException(status_code=503, detail="DATABASE_URL not set")
 
-    # Search all content types for this topic
-    # Over-fetch, then quota down to 30. Fetching exactly 30 would leave nothing to
-    # rebalance if one corpus dominated the top of the ranking — which is exactly how
-    # guides ended up citing podcast timestamps and nothing else.
-    _GUIDE_CONTEXT = 30
-    results = _search_postgres(topic, limit=_GUIDE_CONTEXT * 3, type_="all")
-    hits = _apply_source_quota(results.get("hits") or [], _GUIDE_CONTEXT)
+    # 1. Check DB Cache
+    topic_normalized = topic.lower().strip()
+    conn = None
+    try:
+        conn = _get_db_conn()
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT content, sources_json FROM topic_guides WHERE LOWER(topic) = %s",
+            (topic_normalized,)
+        )
+        row = cur.fetchone()
+        if row:
+            content, sources_json = row
+            _log.info("topic_guide_cache_hit", extra={"topic": topic})
+            # sources_json is stored as JSONB; if returned as a dict/list directly by psycopg2
+            # or as a string, return it appropriately
+            sources = sources_json if isinstance(sources_json, list) else []
+            return {
+                "topic": topic,
+                "content": content,
+                "sources": sources,
+                "cache_hit": True,
+                "ok": True
+            }
+    except Exception as e:
+        _log.warning("topic_guide_cache_check_failed", extra={"error": str(e)})
+        if conn:
+            conn.rollback()
+    finally:
+        if conn:
+            _release_db_conn(conn)
+
+    # 2. Cache Miss: Search all content types for this topic
+    results = _search_postgres(topic, limit=30, type_="all")
+    hits = results.get("hits") or []
+>>>>>>> origin/master
 
     if not hits:
         # Retry with extracted keywords for broader matching (similar to /chat)
@@ -3529,13 +3724,13 @@ def topic_guide(body: TopicGuideRequest):
         # Deduplicate sources for the sources list
         source_key = f"{h.get('type')}:{h.get('id')}"
         if t or d:
-            context_parts.append(f"**{t}** ({author}): {d[:400]}")
+            context_parts.append(f"**{t}** ({author}): {d[:500]}")
             if source_key not in seen_sources:
                 sources.append({
                     "id": h.get("id", ""),
                     "title": t,
                     "description": d,
-                    "source": pod,
+                    "source": pod.title(),
                     "type": h.get("type", ""),
                     "podcast": h.get("podcast"),
                     "video_id": h.get("video_id"),
@@ -3544,20 +3739,33 @@ def topic_guide(body: TopicGuideRequest):
                 seen_sources.add(source_key)
 
     context = "\n\n".join(context_parts)
-    prompt = (
-        f"You are an expert DTC and eCommerce operator analyst. "
-        f"Based on the following insights from industry experts, write a concise, actionable Strategic Playbook on: **{topic}**\n\n"
-        f"Structure the playbook by Revenue Tier:\n"
-        f"1. TIER 1 ($0-$1M): Focus on foundation and initial traction.\n"
-        f"2. TIER 2 ($1M-$10M): Focus on optimization and systems.\n"
-        f"3. TIER 3 ($10M+): Focus on scale and advanced economics.\n\n"
-        f"For each tier, you MUST include:\n"
-        f"- Immediate Actions: Specific steps to take now.\n"
-        f"- Critical Metrics: Which KPIs matter most at this stage.\n\n"
-        f"Format the guide in markdown with clear headers for each tier and a 'Key Takeaways' section at the end.\n"
-        f"Draw directly from these insights (cite the source name where relevant):\n\n{context}\n\n"
-        f"Write the playbook now:"
-    )
+    
+    system = """You are the ECOM Operators Vault Playbook Writer — a world-class ecommerce research director who writes comprehensive, durable, and highly detailed operational playbooks synthesized from hundreds of hours of interviews and newsletters from the world's best 7-, 8-, and 9-figure operators.
+
+Your knowledge base includes:
+- Podcast insights from 9 Operators, Marketing Operators, Finance Operators, and TITANS
+- Newsletters from Nik Sharma, Taylor Holiday (CTC), Matt Bertulli, and Chase Diamond
+- Definitive books like "Ramping Your Brand" by James Richardson, Ph.D.
+
+Your goal is to write a highly professional, exhaustive, "durable" Topic Guide in Markdown format. A durable guide is NOT just a collection of random snippets or a high-level summary; it is a structured, action-oriented masterclass on the requested topic.
+
+Use the provided vault excerpts as your primary evidence. Integrate and synthesize them into cohesive, themed sections. Do not use generic filler words or introductory meta-language. Speak with absolute authority and operational precision.
+
+Structure the Strategic Playbook as follows:
+1. # Playbook Title (Make it authoritative, e.g. "# Masterclass: TikTok Affiliate Program Scaling Loops")
+2. ## Executive Summary: A concise, first-principles synthesis of the operators' consensus on the topic.
+3. ## The Thematic Pillars: Organize the knowledge into 2 to 4 distinct operational pillars. For each pillar, write highly actionable, step-by-step instructions. Include exact metrics, numerical benchmarks, and tools mentioned in the context.
+4. ## Operational Execution & Tiers: Briefly map how execution changes as a brand scales:
+   - Early Stage ($0 - $1M)
+   - Mid-Market ($1M - $10M)
+   - Enterprise ($10M+)
+5. ## Operator Perspectives & Debates: Highlight contrarian views, nuances, or debates among the operators (e.g., Nik Sharma vs. Taylor Holiday).
+6. ## Key Takeaways: A concise bulleted summary of immediate next steps.
+
+When writing, ground your statements by citing specific operators (e.g. "Taylor Holiday at CTC has talked about...", "Nik Sharma recommends...", "As Richardson explains in Ramping Your Brand...") directly in the paragraphs.
+"""
+
+    prompt = f"Generate a comprehensive, durable playbook for this Topic: '{topic}'\n\nHere are the relevant vault excerpts and insights:\n\n{context}"
 
     agent_key = os.environ.get("AGENT_SERVER_API_KEY", "")
     try:
@@ -3566,16 +3774,43 @@ def topic_guide(body: TopicGuideRequest):
             headers["Authorization"] = f"Bearer {agent_key}"
         agent_res = requests.post(
             "https://ent-agent-server-production.up.railway.app/complete",
-            json={"prompt": prompt, "max_tokens": 1500},
+            json={"prompt": f"System: {system}\n\n{prompt}", "max_tokens": 1500},
             headers=headers,
-            timeout=90,
+            timeout=180,
         )
         agent_res.raise_for_status()
         data = agent_res.json()
         content = data.get("text") or data.get("completion") or data.get("content") or ""
         if not content:
             raise ValueError(f"Empty response from agent server: {data}")
-        return {"topic": topic, "content": content, "sources": sources[:10], "ok": True}
+            
+        # 3. Save to DB Cache (topic_guides table)
+        try:
+            import json
+            conn = _get_db_conn()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO topic_guides (topic, content, sources_json)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (topic) DO UPDATE SET
+                    content = EXCLUDED.content,
+                    sources_json = EXCLUDED.sources_json,
+                    updated_at = now()
+                """,
+                (topic, content, json.dumps(sources[:10])),
+            )
+            conn.commit()
+            _log.info("topic_guide_cached", extra={"topic": topic})
+        except Exception as cache_err:
+            _log.warning("topic_guide_cache_save_failed", extra={"error": str(cache_err)})
+            if conn:
+                conn.rollback()
+        finally:
+            if conn:
+                _release_db_conn(conn)
+
+        return {"topic": topic, "content": content, "sources": sources[:10], "cache_hit": False, "ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Guide generation failed: {e!s}")
 

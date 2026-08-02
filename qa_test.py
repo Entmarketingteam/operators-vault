@@ -625,7 +625,7 @@ fail_count = sum([
     1 if results["sample_quality_issue_count"] > 5 else 0,
     1 if len(invalid_cats) > 2 else 0,
     1 if results["fts_coverage_pct"] < 80 else 0,
-    1 if zero_result_queries > 5 else 0,
+    1 if len(zero_result_queries) > 5 else 0,
     1 if chat_fails > 2 else 0,
     1 if "FAIL" in edge_statuses else 0,
     1 if "FAIL" in perf_statuses else 0,
@@ -637,7 +637,7 @@ warn_count = sum([
     1 if results["duplicate_count"] > 0 else 0,
     1 if empty_desc > 0 else 0,
     1 if junk_count > 0 else 0,
-    1 if zero_result_queries > 0 else 0,
+    1 if len(zero_result_queries) > 0 else 0,
     1 if "WARN" in perf_statuses else 0,
     1 if "WARN" in edge_statuses else 0,
 ])
@@ -660,9 +660,9 @@ if coverage_pct < 80:
 if invalid_cats:
     cat_str = ", ".join([f"'{c['category']}' ({c['count']})" for c in invalid_cats[:3]])
     issues_to_report.append(f"2. INVALID CATEGORIES: {len(invalid_cats)} non-standard categories found: {cat_str}")
-if zero_result_queries > 0:
+if len(zero_result_queries) > 0:
     zero_qs = [r['query'] for r in search_results if r['hits'] == 0]
-    issues_to_report.append(f"3. SEARCH GAPS: {zero_result_queries} queries return 0 results: {zero_qs}")
+    issues_to_report.append(f"3. SEARCH GAPS: {len(zero_result_queries)} queries return 0 results: {zero_qs}")
 if results["fts_coverage_pct"] < 95:
     issues_to_report.append(f"4. FTS GAPS: {100-results['fts_coverage_pct']:.1f}% of insights lack FTS index (not searchable)")
 if junk_count > 0:
