@@ -125,6 +125,25 @@ def strip_html(raw: str) -> str:
     return raw.strip()
 
 
+def pick_richest_body(body_html: str, body_text: str) -> str:
+    """Return whichever of the plain-text and stripped-HTML parts carries more content.
+
+    The previous rule was `if body_html and not body_text: use html` — i.e. HTML was
+    consulted only when plain text was completely absent. Newsletter platforms
+    (beehiiv, Mailchimp) almost always ship BOTH: a token text/plain alternative like
+    "View this email in your browser" and the real issue in HTML. Under the old rule
+    the token stub won and the actual content was discarded.
+
+    That is the origin of the truncated corpus measured 2026-08-01: 228 of the 235
+    unextractable rows have bodies under 1500 chars and 113 under 600, concentrated in
+    beehiiv senders (227 of Chase Dimond's 883 issues). They were never truncated in
+    transit — the richer half was thrown away at ingest.
+    """
+    stripped = strip_html(body_html) if body_html else ""
+    plain = body_text or ""
+    return stripped if len(stripped) > len(plain) else plain
+
+
 def clean_email_text(text: str) -> str:
     """Remove common newsletter boilerplate: unsubscribe footers, tracking pixels etc."""
     # Stop at common footer markers
