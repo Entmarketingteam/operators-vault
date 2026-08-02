@@ -4,10 +4,25 @@
 Searchable knowledge base of DTC operator content: podcast transcripts + newsletter archives.
 Powers RAG-based Q&A for ENT Agency internal research.
 
-## Status: LIVE ✅ (last updated 2026-04-08)
-- **308 videos** indexed across 4 podcast channels
-- **5 newsletter sources** — daily sync active
-- **11,000+ insights** in DB (273 junk entries cleaned 2026-03-27)
+## Status: LIVE ✅ (last verified 2026-07-30)
+- **413 videos** indexed across 5 podcast channels; 390 have extracted insights
+- **1,530 newsletter issues**; 1,187 have extracted insights
+- **~56,000 video insights + ~25,400 newsletter insights** in DB
+- ⚠️ The `newsletters.processed` flag is STALE (reads 553 vs 1,187 actually extracted).
+  Use presence of `newsletter_insights` rows as the real coverage metric, not that flag.
+
+## ⚠️ YouTube access: no proxy, residential IP only
+YouTube blocks **datacenter** IPs, which is the only reason the Webshare proxy ever
+existed. That account is banned (`402 Payment Required`), and it is not being replaced.
+Caption pulls now run from a **residential IP**, where no proxy is needed at all.
+A single IP rate-limits (`IpBlocked`) under bulk load, so backfill is paced across days.
+
+**Canonical owner of caption→insight backfill:** `scripts/backfill_captions_job.py`,
+scheduled DAILY 09:15 as Windows task **"ENT Vault Caption Backfill"** on the Alienware
+box (Tailscale `100.120.248.8`, `C:\Users\ejatc\operators-vault`). It replaces the
+Webshare proxy path for backlog work. Harness state lives in `job_runs` /
+`job_checkpoints` (migration `supabase/migrations/20260730_job_harness.sql`).
+Do NOT re-add a proxy or run this from Railway — Railway is a datacenter IP and will fail.
 
 ## URLs
 - **Frontend:** `https://operators-vault.vercel.app`

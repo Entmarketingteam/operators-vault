@@ -50,6 +50,7 @@ from structured_logger import get_logger, log_job_event
 _log = get_logger("api")
 
 # Import after dotenv
+import db_utils
 from deepgram_client import DeepgramAuthError, check_api_key
 from pipeline import _fetch_new, _get_unprocessed, _process_one, run_seed_and_process_all, upsert_seed_links
 
@@ -89,7 +90,7 @@ def _run_startup_migration() -> None:
             _log.warning("startup_migration_missing", extra={"path": str(migration_path)})
             continue
         try:
-            conn = psycopg2.connect(db_url)
+            conn = db_utils.connect(db_url)
             conn.autocommit = True
             with conn.cursor() as cur:
                 sql = migration_path.read_text(encoding="utf-8")
@@ -121,7 +122,26 @@ def _on_startup():
         from newsletter_ingestor import _db_conn
         conn = _db_conn()
         with conn.cursor() as cur:
-            cur.execute("SELECT id, source, body_text FROM newsletters WHERE processed = FALSE AND body_text IS NOT NULL LIMIT 500")
+            # Re-queue on absence of insights, not on `processed`. That flag drifts in
+            # both directions (measured 2026-08-01: 45 rows processed=TRUE with zero
+            # insights, 679 rows processed=FALSE that already had them). Selecting on
+            # the flag both misses real gaps and re-extracts rows that are already
+            # done — and store_newsletter_insights() DELETEs before re-inserting, so a
+            # needless re-run destroys good insights and burns Claude calls.
+            cur.execute(
+                """
+                SELECT n.id, n.source, n.body_text
+                FROM newsletters n
+                WHERE n.body_text IS NOT NULL
+                  AND length(n.body_text) >= 100
+                  AND NOT n.promo_only
+                  AND NOT EXISTS (
+                      SELECT 1 FROM newsletter_insights ni WHERE ni.newsletter_id = n.id
+                  )
+                ORDER BY n.published_at DESC
+                LIMIT 500
+                """
+            )
             rows = cur.fetchall()
         conn.close()
         for row in rows:
@@ -303,7 +323,7 @@ def _do_upsert_seed_links(rows: list[dict]) -> int:
     db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=500, detail="DATABASE_URL not set")
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     try:
         n = upsert_seed_links(cur, rows)
@@ -357,7 +377,7 @@ def _do_fetch_new() -> dict:
     if not os.environ.get("YOUTUBE_API_KEY"):
         raise HTTPException(status_code=500, detail="YOUTUBE_API_KEY not set")
     import psycopg2
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     try:
         n = _fetch_new(cur)
@@ -387,7 +407,7 @@ def _do_sync(job_id: str | None = None) -> dict:
     _log.info("Sync starting: fetch-new phase")
     if job_id:
         _update_job_heartbeat(job_id, progress="fetching new videos")
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     upserted = _fetch_new(cur)
     conn.commit()
@@ -463,7 +483,7 @@ def _do_process_new(job_id: str | None = None) -> dict:
         raise HTTPException(status_code=500, detail=f"Deepgram API key is invalid: {e}")
 
     import psycopg2
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     rows = _get_unprocessed(cur)
     cur.close()
@@ -542,7 +562,7 @@ def _do_extract_insights_from_transcripts(job_id: str | None = None, limit: int 
     if not db_url:
         raise HTTPException(status_code=500, detail="DATABASE_URL not set")
 
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     cur.execute("""
         SELECT v.video_id, v.podcast, t.raw_text
@@ -575,7 +595,7 @@ def _do_extract_insights_from_transcripts(job_id: str | None = None, limit: int 
             from people_extractor import extract_people_from_segments, link_insights_to_people
 
             db = _get_db_url()
-            conn2 = psycopg2.connect(db)
+            conn2 = db_utils.connect(db)
             cur2 = conn2.cursor()
 
             # Extract people from segments (already stored from prior transcription)
@@ -687,7 +707,7 @@ def run_migrate_phase1():
     for stmt in statements:
         # Each DDL statement gets its own fresh connection to avoid pooler SSL drops
         try:
-            conn = psycopg2.connect(db_url)
+            conn = db_utils.connect(db_url)
             conn.autocommit = True
             cur = conn.cursor()
             cur.execute(stmt + ";" if not stmt.rstrip().endswith(";") else stmt)
@@ -712,7 +732,7 @@ def health():
     else:
         try:
             import psycopg2
-            conn = psycopg2.connect(db_url, connect_timeout=5)
+            conn = db_utils.connect(db_url, connect_timeout=5)
             conn.close()
             checks["database"] = "ok"
         except Exception as e:
@@ -775,18 +795,38 @@ _db_pool = None
 
 
 def _get_db_url():
-    """Get DB URL and force port 6543 for Supabase pooler (Transaction Mode)."""
-    url = os.environ.get("DATABASE_URL")
-    if not url:
-        return None
-    if "pooler.supabase.com" in url and ":5432" in url:
-        # Port 5432 is Session mode (limited to 15-20); 6543 is Transaction mode (thousands)
-        url = url.replace(":5432", ":6543")
-    return url
+    """Get DB URL routed to the working Supabase pooler port.
+
+    The transaction pooler (6543) is currently dropping SSL on every connection
+    ("SSL connection has been closed unexpectedly"); the session pooler (5432) is
+    healthy. db_utils.resolve_db_url() rewrites 6543 -> 5432 for Supabase URLs.
+    """
+    return db_utils.resolve_db_url()
+
+
+def _is_conn_alive(conn) -> bool:
+    """Cheap liveness probe — pooler may have dropped the socket while pooled."""
+    if conn is None or conn.closed:
+        return False
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        # Clear the probe's implicit transaction so the borrowed connection
+        # starts idle, not INTRANS.
+        conn.rollback()
+        return True
+    except Exception:
+        return False
 
 
 def _get_db_conn():
-    """Get a connection from the global pool."""
+    """Get a live connection from the global pool.
+
+    The session pooler (5432) can drop pooled connections server-side, so a
+    borrowed connection is validated before being handed out; a dead one is
+    discarded (not reused) and a fresh one is fetched.
+    """
     global _db_pool
     url = _get_db_url()
     if not url:
@@ -794,22 +834,49 @@ def _get_db_conn():
     if _db_pool is None:
         try:
             import psycopg2.pool
-            # min 2, max 20 connections
-            _db_pool = psycopg2.pool.ThreadedConnectionPool(2, 20, url)
+            # Session pooler (5432) caps near 15 concurrent connections; keep
+            # maxconn below that ceiling (see db_utils.DB_POOL_MAX).
+            _db_pool = psycopg2.pool.ThreadedConnectionPool(2, db_utils.DB_POOL_MAX, url)
         except Exception as e:
             _log.error("db_pool_init_failed", extra={"error": str(e)})
             raise HTTPException(status_code=500, detail="Database pool initialization failed")
     try:
-        return _db_pool.getconn()
+        for _ in range(db_utils.DB_POOL_MAX):
+            conn = _db_pool.getconn()
+            if _is_conn_alive(conn):
+                return conn
+            # Pooler closed this one — drop it (don't recycle) and try another.
+            _log.warning("db_conn_stale_discarded")
+            _db_pool.putconn(conn, close=True)
+        # Every pooled slot was stale — open one fresh, with retry on SSL drops.
+        return db_utils.connect(url)
     except Exception as e:
         _log.error("db_get_conn_failed", extra={"error": str(e)})
         raise HTTPException(status_code=503, detail="Database connection limit reached")
 
 
 def _release_db_conn(conn):
-    """Release a connection back to the pool."""
-    if _db_pool and conn:
-        _db_pool.putconn(conn)
+    """Return a connection to the pool, discarding it if it's dead.
+
+    A broken/SSL-dropped connection returned with a plain putconn() poisons the
+    pool — the next request gets the dead socket and also fails. Closing it on
+    release forces the pool to mint a fresh one instead.
+    """
+    if not conn:
+        return
+    if _db_pool:
+        broken = conn.closed != 0
+        if not broken:
+            try:
+                import psycopg2.extensions as _ext
+                # End any open transaction (read endpoints leave the conn INTRANS)
+                # so it doesn't return to the pool "idle in transaction", which
+                # blocks VACUUM and gets reaped by idle_in_transaction_timeout.
+                if conn.get_transaction_status() != _ext.TRANSACTION_STATUS_IDLE:
+                    conn.rollback()
+            except Exception:
+                broken = True
+        _db_pool.putconn(conn, close=broken)
 
 
 # ---------------------------------------------------------------------------
@@ -833,6 +900,56 @@ def _extract_keywords(q: str) -> str:
     # Remove stop words, short words, and tokens containing digits (e.g. "8")
     kw = [w for w in words if w not in _STOP and len(w) > 2 and not any(c.isdigit() for c in w)]
     return " OR ".join(kw[:6])  # OR-joined for maximum recall in fallback
+
+
+def _normalize_ranks_by_type(hits: list[dict]) -> list[dict]:
+    """Add `rank_norm` (0-1) scaled within each result `type`.
+
+    ts_rank is only comparable inside a single corpus. Min-max scaling each type
+    independently lets "best newsletter hit" compete with "best video hit" instead
+    of letting one corpus's absolute score range win by construction.
+
+    A single hit, or a group where every score ties, normalizes to 1.0 — with one
+    data point there is no evidence it is a weak match, so it should not be
+    penalised against a group that happens to have spread.
+    """
+    by_type: dict[str, list[dict]] = {}
+    for h in hits:
+        by_type.setdefault(h.get("type") or "unknown", []).append(h)
+
+    for group in by_type.values():
+        ranks = [float(h.get("rank") or 0) for h in group]
+        lo, hi = min(ranks), max(ranks)
+        span = hi - lo
+        for h, r in zip(group, ranks):
+            h["rank_norm"] = 1.0 if span <= 0 else (r - lo) / span
+    return hits
+
+
+# Share of guide/chat context reserved for newsletter insights. Newsletters and
+# podcasts cover different ground — the CAC-ceiling and OPEX-floor material lives
+# almost entirely in newsletters — so the context builder guarantees both are
+# represented rather than trusting relevance ranking to mix them.
+_NEWSLETTER_CONTEXT_SHARE = 0.4
+
+
+def _apply_source_quota(hits: list[dict], limit: int, newsletter_share: float = _NEWSLETTER_CONTEXT_SHARE) -> list[dict]:
+    """Interleave newsletter and video/moment hits so neither can crowd the other out.
+
+    Whichever side is short of its quota yields its unused slots to the other, so a
+    topic genuinely covered by only one corpus still fills the full context window.
+    """
+    newsletters = [h for h in hits if h.get("type") == "newsletter_insight"]
+    others = [h for h in hits if h.get("type") != "newsletter_insight"]
+
+    want_nl = min(len(newsletters), int(round(limit * newsletter_share)))
+    want_other = min(len(others), limit - want_nl)
+    # Reclaim slots the other side could not fill.
+    want_nl = min(len(newsletters), limit - want_other)
+
+    picked = newsletters[:want_nl] + others[:want_other]
+    picked.sort(key=lambda h: float(h.get("rank_norm") or h.get("rank") or 0), reverse=True)
+    return picked
 
 
 def _search_postgres(
@@ -1009,7 +1126,11 @@ def _search_postgres(
             cur = conn.cursor()
             def _do_newsletter_search(query_str: str) -> list[dict]:
                 q_clean = query_str.strip()
-                nl_where = ["to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')) @@ websearch_to_tsquery('english', %s)"]
+                # ni.fts is a stored, weighted column mirroring insights.fts (migration
+                # 20260801_newsletter_insights_fts.sql). Before it existed this ranked an
+                # inline UNWEIGHTED to_tsvector against the video side's weighted one, and
+                # newsletters lost essentially every slot in the merge sort below.
+                nl_where = ["ni.fts @@ websearch_to_tsquery('english', %s)"]
                 nl_params: list = [q_clean, q_clean]
                 if podcast:
                     nl_where.append("ni.source = %s")
@@ -1022,7 +1143,7 @@ def _search_postgres(
                     f"""
                     SELECT ni.id, ni.source, ni.category, ni.title, ni.description,
                            n.subject, n.author, n.published_at,
-                           ts_rank(to_tsvector('english', coalesce(ni.title,'') || ' ' || coalesce(ni.description,'')), websearch_to_tsquery('english', %s)) AS rank,
+                           ts_rank(ni.fts, websearch_to_tsquery('english', %s)) AS rank,
                            ni.newsletter_id::text
                     FROM newsletter_insights ni
                     JOIN newsletters n ON n.id = ni.newsletter_id
@@ -1062,11 +1183,18 @@ def _search_postgres(
         finally:
             if conn: _release_db_conn(conn)
 
-    # Final Rank-based sort and limit for combined results
+    # Final sort. Rank must be normalized per corpus first: raw ts_rank values are
+    # only meaningful *within* one result set. Video insights, transcript moments and
+    # newsletter insights are three separate corpora with different document lengths
+    # and term distributions, so their absolute scores are not comparable even now
+    # that all three use weighted tsvectors. Sorting on the raw value is what buried
+    # newsletters (98 video / 2 newsletter on a 100-hit CAC query) and made
+    # /topic-guide and /chat read as podcast-only.
     if hits:
-        hits.sort(key=lambda h: float(h.get("rank") or 0), reverse=True)
+        hits = _normalize_ranks_by_type(hits)
+        hits.sort(key=lambda h: float(h.get("rank_norm") or 0), reverse=True)
         hits = hits[:limit]
-        
+
     return {"query": q or "(all)", "total": len(hits), "hits": hits}
 
 
@@ -1278,7 +1406,7 @@ def _get_person_by_slug(slug: str) -> dict:
     db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
         cur.execute("SELECT id, name, role_or_title, bio FROM people WHERE slug = %s", (slug,))
@@ -1351,7 +1479,7 @@ def _get_company_by_slug(slug: str) -> dict:
     db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
         cur.execute("SELECT id, name, type, description FROM companies WHERE slug = %s", (slug,))
@@ -1448,7 +1576,7 @@ def _search_visuals(
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     limit = min(limit, 100)
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
         cur.execute(
@@ -1493,7 +1621,7 @@ def _get_related_content(video_id: str, insight_id: str | None = None, limit: in
     db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
         if insight_id:
@@ -1573,7 +1701,7 @@ def get_visual_moments(
     db_url = _get_db_url()
     if not db_url:
         return {"moments": []}
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     try:
         cur.execute(
@@ -1608,7 +1736,7 @@ def get_visual_moments(
     db_url = _get_db_url()
     if not db_url:
         return {"moments": []}
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     try:
         cur.execute(
@@ -1659,7 +1787,7 @@ def _list_speakers(limit: int = 50, offset: int = 0) -> dict:
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     limit = min(limit, 200)
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
         # Check which host columns exist (avoids DDL permission issues); use cache to skip repeated queries
@@ -1766,7 +1894,7 @@ def _get_speaker_by_slug(slug: str) -> dict:
     db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
         # Check which host columns exist
@@ -1996,7 +2124,7 @@ def _upsert_speaker(data: SpeakerUpsertRequest) -> dict:
     db_url = _get_db_url()
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     cur = conn.cursor()
     try:
         # Check which host columns exist
@@ -2114,7 +2242,7 @@ def admin_migrate_host_fields():
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     results = []
-    conn = psycopg2.connect(db_url, connect_timeout=10)
+    conn = db_utils.connect(db_url, connect_timeout=10)
     try:
         conn.autocommit = True
         cur = conn.cursor()
@@ -2160,9 +2288,10 @@ def chat(
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
 
-    # Search both podcast insights and newsletter insights
-    search_result = _search_postgres(msg, limit=body.context_limit, type_="all")
-    hits = search_result.get("hits") or []
+    # Search both podcast insights and newsletter insights. Over-fetch then quota so
+    # the answer draws on both corpora — see _apply_source_quota.
+    search_result = _search_postgres(msg, limit=body.context_limit * 3, type_="all")
+    hits = _apply_source_quota(search_result.get("hits") or [], body.context_limit)
 
     # If no hits with full question, retry with OR-joined extracted keywords
     # This handles conversational phrasing and acronyms like BFCM that need
@@ -2170,12 +2299,12 @@ def chat(
     if not hits:
         kw_query = _extract_keywords(msg)
         if kw_query and kw_query.replace(" OR ", " ").strip() != msg.lower().strip():
-            search_result = _search_postgres(kw_query, limit=body.context_limit, type_="all")
-            hits = search_result.get("hits") or []
+            search_result = _search_postgres(kw_query, limit=body.context_limit * 3, type_="all")
+            hits = _apply_source_quota(search_result.get("hits") or [], body.context_limit)
 
     # Enrich podcast insights with speaker names via people join
     try:
-        conn = psycopg2.connect(db_url, connect_timeout=10)
+        conn = db_utils.connect(db_url, connect_timeout=10)
         cur = conn.cursor()
         insight_ids = [h["id"] for h in hits if h.get("type") != "newsletter_insight" and h.get("id")]
         if insight_ids:
@@ -2785,7 +2914,7 @@ def stats():
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
-        conn = psycopg2.connect(db_url, connect_timeout=15)
+        conn = db_utils.connect(db_url, connect_timeout=15)
         cur = conn.cursor()
         try:
             cur.execute(
@@ -2887,7 +3016,10 @@ def _newsletter_extract_worker():
     set so the row stops blocking the queue and is visible to ops.
     """
     import psycopg2
-    from newsletter_ingestor import extract_newsletter_insights, store_newsletter_insights, chunk_text, _db_conn
+    from newsletter_ingestor import (
+        extract_newsletter_insights, store_newsletter_insights, chunk_text, _db_conn,
+        is_promo_only, mark_promo_only,
+    )
     while True:
         try:
             newsletter_id, source, body_text = _newsletter_extract_queue.get(timeout=5)
@@ -2897,7 +3029,7 @@ def _newsletter_extract_worker():
                 conn = _db_conn()
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT processed, COALESCE(retry_count, 0) FROM newsletters WHERE id = %s",
+                        "SELECT processed, COALESCE(retry_count, 0), subject FROM newsletters WHERE id = %s",
                         (newsletter_id,),
                     )
                     row = cur.fetchone()
@@ -2906,6 +3038,16 @@ def _newsletter_extract_worker():
                     _newsletter_extract_queue.task_done()
                     continue
                 retry_count = int(row[1] or 0)
+                subject = row[2] or ""
+                # Promo gate lives here rather than in the endpoint so it covers both
+                # the live n8n path and every re-queue, and so the HTTP response is
+                # not held open for a classifier call.
+                if is_promo_only(body_text, subject):
+                    mark_promo_only(newsletter_id)
+                    _log.info("newsletter_promo_skipped",
+                              extra={"newsletter_id": newsletter_id, "subject": subject[:80]})
+                    _newsletter_extract_queue.task_done()
+                    continue
                 try:
                     chunks = chunk_text(body_text)
                     all_insights = []
@@ -3017,16 +3159,28 @@ def ingest_newsletter(req: NewsletterIngestRequest):
         strip_html, clean_email_text, upsert_newsletter
     )
 
-    source = req.source
-    if (not source or source == "unknown") and req.sender_email:
-        inferred = infer_source_from_sender(req.sender_email)
-        if inferred:
-            source = inferred
+    # The From header is authoritative; req.source is only a hint. This used to be
+    # the other way round — inference ran only when the caller sent nothing — and
+    # because n8n always sent a source, the inference never fired. n8n's Parse Email
+    # Body node resolved that source with `$('Source Config').first()`, which always
+    # returns config item #1, so every issue from 2026-05-09 on was filed as
+    # nik_sharma: Taylor Holiday's and Matt Bertulli's issues included. Deriving it
+    # here, server-side, kills the bug class rather than patching the caller.
+    source = infer_source_from_sender(req.sender_email) if req.sender_email else None
+    if not source:
+        if req.source in NEWSLETTER_SOURCES:
+            source = req.source
+        else:
+            # Never guess. Store it, flag it, and let the staleness/ops check surface
+            # it — dropping mail because a sender is unrecognised loses it silently.
+            source = "unclassified"
+            _log.warning(
+                "newsletter_unclassified_sender",
+                extra={"sender": req.sender_email, "claimed_source": req.source, "subject": req.subject},
+            )
 
-    if source not in NEWSLETTER_SOURCES and source != "unknown":
-        raise HTTPException(status_code=400, detail=f"Unknown source '{source}'. Valid: {list(NEWSLETTER_SOURCES.keys())}")
-
-    author = req.author or (NEWSLETTER_SOURCES.get(source, {}).get("author", source))
+    # Author follows the derived source, not the caller's claim, for the same reason.
+    author = NEWSLETTER_SOURCES.get(source, {}).get("author") or req.author or source
 
     try:
         # Clean body
@@ -3054,6 +3208,78 @@ def ingest_newsletter(req: NewsletterIngestRequest):
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {e!s}")
 
 
+@app.get("/newsletter-health")
+def newsletter_health(stale_days: int = 10):
+    """Report per-source freshness and extraction health.
+
+    This exists because the newsletter layer failed silently for three months and
+    nobody was paged. Two distinct failures have to be caught, and only one of them
+    looks like an error:
+
+      * a source stops arriving (sync/auth/filter broken)
+      * issues keep arriving but produce zero insights (extraction broken) — the
+        org's dominant silent-failure signature, a green run with 0 rows
+
+    Returns ok=false when either fires, so a caller can alert on the flag without
+    re-deriving the logic. `stale_days` is generous by default: the least frequent
+    source (Taylor Holiday) can legitimately go a week between sends.
+    """
+    conn = None
+    try:
+        conn = _get_db_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            -- count(DISTINCT n.id): the join to newsletter_insights fans out one row
+            -- per insight, so a plain count(n.id) reports insight rows as if they
+            -- were issues and makes the arriving-but-not-extracting check unable to
+            -- fire. promo_only issues are excluded from the extraction check because
+            -- having zero insights is the correct outcome for them.
+            SELECT c.slug,
+                   max(n.published_at) AS latest,
+                   count(DISTINCT n.id) FILTER (
+                       WHERE n.published_at > now() - interval '30 days'
+                         AND NOT n.promo_only
+                   ) AS issues_30d,
+                   count(ni.id) FILTER (
+                       WHERE n.published_at > now() - interval '30 days'
+                   ) AS insights_30d
+            FROM newsletter_source_configs c
+            LEFT JOIN newsletters n ON n.source = c.slug
+            LEFT JOIN newsletter_insights ni ON ni.newsletter_id = n.id
+            WHERE c.active
+            GROUP BY c.slug
+            ORDER BY c.slug
+            """
+        )
+        sources, problems = [], []
+        for slug, latest, issues_30d, insights_30d in cur.fetchall():
+            days = (datetime.now(timezone.utc) - latest).days if latest else None
+            stale = days is None or days > stale_days
+            # Arriving but not extracting: the failure that ran unnoticed from May.
+            dead_extraction = bool(issues_30d) and not insights_30d
+            if stale:
+                problems.append(f"{slug}: no issue in {days if days is not None else 'ever'} days")
+            if dead_extraction:
+                problems.append(f"{slug}: {issues_30d} issues in 30d but 0 insights extracted")
+            sources.append({
+                "source": slug,
+                "latest": latest.isoformat() if latest else None,
+                "days_since_latest": days,
+                "issues_30d": issues_30d,
+                "insights_30d": insights_30d,
+                "stale": stale,
+                "extraction_dead": dead_extraction,
+            })
+        return {"ok": not problems, "problems": problems, "sources": sources}
+    except Exception as e:
+        _log.error("newsletter_health_failed", extra={"error": str(e)})
+        raise HTTPException(status_code=500, detail="newsletter health check failed")
+    finally:
+        if conn:
+            _release_db_conn(conn)
+
+
 @app.post("/process-newsletters")
 def process_newsletters(limit: int = 50):
     """
@@ -3067,8 +3293,21 @@ def process_newsletters(limit: int = 50):
     conn = _db_conn()
     try:
         with conn.cursor() as cur:
+            # Same anti-join as the startup re-queue: `processed` is not a reliable
+            # signal of whether insights actually exist. See _on_startup().
             cur.execute(
-                "SELECT id, source, body_text FROM newsletters WHERE processed = FALSE AND body_text IS NOT NULL ORDER BY created_at ASC LIMIT %s",
+                """
+                SELECT n.id, n.source, n.body_text
+                FROM newsletters n
+                WHERE n.body_text IS NOT NULL
+                  AND length(n.body_text) >= 100
+                  AND NOT n.promo_only
+                  AND NOT EXISTS (
+                      SELECT 1 FROM newsletter_insights ni WHERE ni.newsletter_id = n.id
+                  )
+                ORDER BY n.published_at DESC
+                LIMIT %s
+                """,
                 (limit,)
             )
             rows = cur.fetchall()
@@ -3098,7 +3337,7 @@ def list_newsletters(
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
-        conn = psycopg2.connect(db_url, connect_timeout=15)
+        conn = db_utils.connect(db_url, connect_timeout=15)
         cur = conn.cursor()
         try:
             where = []
@@ -3145,7 +3384,7 @@ def get_newsletter(newsletter_id: str):
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
-        conn = psycopg2.connect(db_url, connect_timeout=10)
+        conn = db_utils.connect(db_url, connect_timeout=10)
         cur = conn.cursor()
         try:
             cur.execute(
@@ -3260,16 +3499,19 @@ def topic_guide(body: TopicGuideRequest):
         raise HTTPException(status_code=400, detail="topic required")
 
     # Search all content types for this topic
-    results = _search_postgres(topic, limit=30, type_="all")
-    hits = results.get("hits") or []
+    # Over-fetch, then quota down to 30. Fetching exactly 30 would leave nothing to
+    # rebalance if one corpus dominated the top of the ranking — which is exactly how
+    # guides ended up citing podcast timestamps and nothing else.
+    _GUIDE_CONTEXT = 30
+    results = _search_postgres(topic, limit=_GUIDE_CONTEXT * 3, type_="all")
+    hits = _apply_source_quota(results.get("hits") or [], _GUIDE_CONTEXT)
 
-    # Also search newsletter insights directly (they're included in "all" but let's be thorough)
     if not hits:
         # Retry with extracted keywords for broader matching (similar to /chat)
         kw_query = _extract_keywords(topic)
         if kw_query and kw_query.replace(" OR ", " ").strip() != topic.lower().strip():
-            results = _search_postgres(kw_query, limit=30, type_="all")
-            hits = results.get("hits", [])
+            results = _search_postgres(kw_query, limit=_GUIDE_CONTEXT * 3, type_="all")
+            hits = _apply_source_quota(results.get("hits") or [], _GUIDE_CONTEXT)
 
     if not hits:
         raise HTTPException(status_code=404, detail=f"No content found on topic: {topic}")
@@ -3356,7 +3598,7 @@ def newsletter_sources():
         return {"sources": _NEWSLETTER_SOURCES_FALLBACK, "source": "fallback"}
     try:
         import psycopg2
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT slug, author, gmail_query, active, created_at FROM newsletter_source_configs WHERE active = TRUE ORDER BY created_at"
@@ -3387,7 +3629,7 @@ def newsletter_sources_create(req: NewsletterSourceCreateRequest):
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
         import psycopg2
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -3424,7 +3666,7 @@ def list_channels():
         return {"channels": [{"slug": k, "channel_handle": v, "display_name": k.replace("_", " ").title()} for k, v in DEFAULT_CHANNEL_HANDLES.items()], "source": "fallback"}
     try:
         import psycopg2
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT slug, channel_handle, display_name, active, created_at FROM channel_configs WHERE active = TRUE ORDER BY created_at"
@@ -3455,7 +3697,7 @@ def channels_create(req: ChannelCreateRequest):
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
     try:
         import psycopg2
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         with conn.cursor() as cur:
             cur.execute(
                 """

@@ -31,6 +31,7 @@ except ImportError:
                 if k.strip():
                     os.environ.setdefault(k.strip(), v.strip())
 
+import db_utils
 from structured_logger import get_logger
 
 _log = get_logger("pipeline")
@@ -143,11 +144,10 @@ def _ensure_video(
                 )
             except Exception:
                 # Connection is completely dead — open a fresh one and retry
-                import os as _os
-                _db_url = _os.environ.get("DATABASE_URL", "")
+                _db_url = db_utils.resolve_db_url() or ""
                 if not _db_url:
                     raise
-                _fresh_conn = psycopg2.connect(_db_url)
+                _fresh_conn = db_utils.connect(_db_url)
                 _fresh_cur = _fresh_conn.cursor()
                 _fresh_cur.execute(
                     """
@@ -268,10 +268,10 @@ def _load_channel_configs_from_db() -> dict[str, str]:
     from youtube_client import DEFAULT_CHANNEL_HANDLES
     try:
         import psycopg2
-        db_url = os.environ.get("DATABASE_URL", "")
+        db_url = db_utils.resolve_db_url() or ""
         if not db_url:
             return dict(DEFAULT_CHANNEL_HANDLES)
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT slug, channel_handle FROM channel_configs WHERE active = TRUE ORDER BY created_at"
@@ -364,11 +364,11 @@ def _process_one(
 
     work_dir = work_dir or Path(os.environ.get("TEMP", "/tmp"))
     # 1) Ensure video in DB
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = db_utils.resolve_db_url()
     if db_url:
         import psycopg2
 
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         cur = conn.cursor()
         _ensure_video(cur, video_id, podcast, "", None)
         conn.commit()
@@ -427,9 +427,9 @@ def _process_one(
     if db_url:
         import psycopg2
 
-        # Supabase transaction pooler (port 6543) defaults to a short statement_timeout.
-        # Override at session level so multi-hundred-row inserts don't get killed.
-        conn = psycopg2.connect(db_url, options="-c statement_timeout=600000")
+        # Supabase poolers default to a short statement_timeout. Override at
+        # session level so multi-hundred-row inserts don't get killed.
+        conn = db_utils.connect(db_url, options="-c statement_timeout=600000")
         cur = conn.cursor()
         cur.execute("DELETE FROM transcriptions WHERE video_id = %s", (video_id,))
         cur.execute(
@@ -472,7 +472,7 @@ def _process_one(
     if db_url:
         import psycopg2
 
-        conn = psycopg2.connect(db_url, options="-c statement_timeout=600000")
+        conn = db_utils.connect(db_url, options="-c statement_timeout=600000")
         cur = conn.cursor()
         cur.execute("DELETE FROM insights WHERE video_id = %s", (video_id,))
         # Phase 2: Extract people from segments
@@ -572,11 +572,11 @@ def run_seed_and_process_all(
     """
     import psycopg2
 
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = db_utils.resolve_db_url()
     if not db_url:
         raise ValueError("DATABASE_URL not set")
 
-    conn = psycopg2.connect(db_url)
+    conn = db_utils.connect(db_url)
     cur = conn.cursor()
     seeded: int = 0
     if seed_link_rows:
@@ -627,14 +627,14 @@ def main() -> int:
     args = ap.parse_args()
 
     work_dir = Path(args.work_dir) if args.work_dir else None
-    db_url = os.environ.get("DATABASE_URL")
+    db_url = db_utils.resolve_db_url()
 
     if args.seed_csvs_to_db:
         if not db_url:
             print("DATABASE_URL not set; cannot seed-csvs-to-db.", flush=True)
             return 1
         import psycopg2
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         cur = conn.cursor()
         n = _seed_csvs_to_db(cur, paths_override=None)
         conn.commit()
@@ -652,7 +652,7 @@ def main() -> int:
             print(f"Seeded {out['seeded']} from seed_links; processed {out['processed']}.", flush=True)
             return 0
         import psycopg2
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         cur = conn.cursor()
         n = _seed_from_db(cur)
         conn.commit()
@@ -671,7 +671,7 @@ def main() -> int:
             return 0
         import psycopg2
 
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         cur = conn.cursor()
         n = _seed_csvs(cur, paths_override=None)
         conn.commit()
@@ -693,7 +693,7 @@ def main() -> int:
             return 1
         import psycopg2
 
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         cur = conn.cursor()
         n = _fetch_new(cur)
         conn.commit()
@@ -709,7 +709,7 @@ def main() -> int:
             return 1
         import psycopg2
 
-        conn = psycopg2.connect(db_url)
+        conn = db_utils.connect(db_url)
         cur = conn.cursor()
         rows = _get_unprocessed(cur)
         cur.close()

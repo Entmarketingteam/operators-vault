@@ -21,34 +21,49 @@ def _load_prompt(name: str, prompt_set: str = DEFAULT_PROMPT_SET) -> str:
 
 
 def _anthropic_message(system: str, user: str, model: str = "claude-haiku-4-5-20251001") -> str:
-    # Try agent server proxy first (uses Claude Max subscription, no API key needed)
+    # Try agent server proxy first (uses Claude Max subscription, no API key needed).
+    # The proxy is the primary path, so retry it before considering the API key: a
+    # single transient blip used to fall straight through to a dead key and kill the run.
     agent_server = os.environ.get("AGENT_SERVER_URL", "https://ent-agent-server-production.up.railway.app")
     agent_key = os.environ.get("AGENT_SERVER_API_KEY")
+    proxy_err: Exception | None = None
     if agent_key:
-        try:
-            import urllib.request, json as _json
-            prompt = f"<system>\n{system}\n</system>\n\n{user}" if system else user
-            data = _json.dumps({"prompt": prompt, "model": model}).encode()
-            req = urllib.request.Request(
-                f"{agent_server}/complete",
-                data=data,
-                headers={"Content-Type": "application/json", "Authorization": f"Bearer {agent_key}"},
-            )
-            resp = _json.loads(urllib.request.urlopen(req, timeout=120).read())
-            text = resp.get("text", "")
-            if text:
-                return text
-        except Exception:
-            pass  # Fall through to direct API
+        import time
+        import urllib.request, json as _json
+        prompt = f"<system>\n{system}\n</system>\n\n{user}" if system else user
+        data = _json.dumps({"prompt": prompt, "model": model}).encode()
+        for attempt in range(5):
+            try:
+                req = urllib.request.Request(
+                    f"{agent_server}/complete",
+                    data=data,
+                    headers={"Content-Type": "application/json", "Authorization": f"Bearer {agent_key}"},
+                )
+                resp = _json.loads(urllib.request.urlopen(req, timeout=120).read())
+                text = resp.get("text", "")
+                rc = resp.get("returncode")
+                if rc not in (0, None):
+                    # Proxy ran the CLI but it failed (usage limit, auth, crash). The
+                    # body still carries 200 + text, so this must be checked explicitly
+                    # or a non-answer gets parsed as "0 insights" and stored as success.
+                    proxy_err = RuntimeError(f"agent server returncode={rc}: {str(resp.get('stderr'))[:200]}")
+                elif text:
+                    return text
+                else:
+                    proxy_err = RuntimeError("agent server returned empty text")
+            except Exception as e:
+                proxy_err = e
+            if attempt < 4:
+                time.sleep(2 ** attempt)  # 1s, 2s, 4s, 8s
 
     # Fall back to direct Anthropic API
     try:
         import anthropic
     except ImportError:
-        return ""
+        raise RuntimeError(f"agent server unavailable and anthropic SDK not installed: {proxy_err}")
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
-        return ""
+        raise RuntimeError(f"agent server unavailable and ANTHROPIC_API_KEY not set: {proxy_err}")
     c = anthropic.Anthropic(api_key=api_key)
     r = c.messages.create(
         model=model,
