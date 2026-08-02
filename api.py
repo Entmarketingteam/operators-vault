@@ -3362,7 +3362,7 @@ def ingest_newsletter(req: NewsletterIngestRequest):
     """
     from newsletter_ingestor import (
         infer_source_from_sender, NEWSLETTER_SOURCES,
-        strip_html, clean_email_text, upsert_newsletter
+        pick_richest_body, clean_email_text, upsert_newsletter
     )
 
     # The From header is authoritative; req.source is only a hint. This used to be
