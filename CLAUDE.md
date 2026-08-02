@@ -31,7 +31,28 @@ Four independent defects, all verified against the live DB and the Gmail API:
    run, and the 2-day window moved past the skipped issues permanently — 137 of 200
    issues in 100 days were lost. **Always go through `db_utils.connect()`** (probes
    with `SELECT 1`, retries transient drops). Do not re-add a connection pool here.
-4. **Newsletters lost every search slot.** `newsletter_insights` had no `fts` column
+4. **⚠️ THE BIG ONE — the n8n Parse Email Body node discarded all but ONE email per run.**
+   n8n Code nodes in *Run Once for All Items* mode execute **once**, and `$json` is
+   only the **first** input item. The node read `const msg = $json` and returned a
+   single element, so every run POSTed exactly one newsletter no matter how many
+   Gmail returned. Verified against real executions:
+
+   | execution | Gmail fetched | POSTed |
+   |---|---|---|
+   | 148835 | 6 | **1** |
+   | 147883 | 6 | **1** |
+   | 149677 | 3 | **1** |
+
+   This was the largest single cause of the ~68% ingestion loss — larger than the
+   connection failures. Backfilling `chase_dimond` after the fix recovered **126
+   entire issues** that had never been ingested (883 → 1,009) and moved his latest
+   issue from 2026-07-08 to current.
+
+   **Rule: any n8n Code node that processes messages MUST iterate `$input.all()`
+   and return one item per message.** Never `const msg = $json`. Also note the
+   backfill workflow was set to `runOnceForEachItem`, where returning an *array* is
+   the wrong shape and errors the whole run — it had never worked even once.
+5. **Newsletters lost every search slot.** `newsletter_insights` had no `fts` column
    and was ranked on an inline *unweighted* tsvector against `insights.fts`, which is
    weighted — so ts_rank buried them (98 video / 2 newsletter on a 100-hit query).
    Fixed by `20260801_newsletter_insights_fts.sql` + rank normalization + a source
