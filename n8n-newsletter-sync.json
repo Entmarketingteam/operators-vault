@@ -4,24 +4,35 @@
     {
       "parameters": {
         "rule": {
-          "interval": [{ "field": "hours", "hoursInterval": 24 }]
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 24
+            }
+          ]
         }
       },
       "id": "schedule",
       "name": "Schedule Trigger",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [250, 300]
+      "position": [
+        250,
+        300
+      ]
     },
     {
       "parameters": {
-        "jsCode": "// Check each source for emails from the past 48 hours\nconst SOURCES = [\n  { source: 'nik_sharma', author: 'Nik Sharma', query: 'from:niksharma@workweek.com newer_than:2d' },\n  { source: 'taylor_holiday', author: 'Taylor Holiday / CTC', query: 'from:taylorholiday@commonthreadco.com newer_than:2d' },\n  { source: 'matt_bertulli', author: 'Matt Bertulli', query: 'from:m@mattbertulli.com newer_than:2d' },\n  { source: 'chase_dimond', author: 'Chase Dimond', query: '(from:chase@chasedimond.com OR from:ecomemailmarketer@mail.beehiiv.com) newer_than:2d' },\n  { source: 'operators_newsletter', author: 'Operators Newsletter', query: 'from:news@operatorscontent.com newer_than:2d' },\n];\nreturn SOURCES.map(s => ({ json: s }));"
+        "jsCode": "// Gmail queries per newsletter source.\n// newer_than:7d (was 2d): the ingest POST used to 500 on dead pooled DB\n// connections, n8n aborted the run, and a 2-day window then moved past every\n// skipped issue permanently — 137 of 200 issues in 100 days were lost that way.\n// A 7-day window re-offers anything a failed run missed; newsletters.email_id is\n// unique so re-offering is idempotent.\n// in:anywhere: Jordan West and DTC Daily issues land in TRASH, and the default\n// query scope silently skips spam/trash.\nconst WINDOW = 'newer_than:7d in:anywhere';\nconst SOURCES = [\n  { source: 'nik_sharma',           query: `from:niksharma@workweek.com ${WINDOW}` },\n  { source: 'taylor_holiday',       query: `from:taylorholiday@commonthreadco.com ${WINDOW}` },\n  { source: 'matt_bertulli',        query: `from:m@mattbertulli.com ${WINDOW}` },\n  { source: 'chase_dimond',         query: `(from:chase@chasedimond.com OR from:ecomemailmarketer@mail.beehiiv.com) ${WINDOW}` },\n  { source: 'operators_newsletter', query: `from:news@operatorscontent.com ${WINDOW}` },\n  { source: 'jordan_west',          query: `from:jordanwestnewsletter@mail.beehiiv.com ${WINDOW}` },\n  { source: 'chew_on_this',         query: `from:chew-on-this@mail.beehiiv.com ${WINDOW}` },\n];\nreturn SOURCES.map(s => ({ json: s }));\n"
       },
       "id": "sources",
       "name": "Source Config",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [450, 300]
+      "position": [
+        450,
+        300
+      ]
     },
     {
       "parameters": {
@@ -37,22 +48,29 @@
       "name": "Fetch Gmail Messages",
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2,
-      "position": [650, 300],
+      "position": [
+        650,
+        300
+      ],
       "credentials": {
         "gmailOAuth2": {
+          "id": "DrHd2VFfLvVKxa8N",
           "name": "Gmail account"
         }
       }
     },
     {
       "parameters": {
-        "jsCode": "const msg = $json;\nconst source = $('Source Config').first().json;\n\nlet bodyText = '';\nlet bodyHtml = '';\n\nif (msg.payload) {\n  const payload = msg.payload;\n  if (payload.body && payload.body.data) {\n    const decoded = Buffer.from(payload.body.data, 'base64').toString('utf-8');\n    if (payload.mimeType === 'text/html') bodyHtml = decoded;\n    else bodyText = decoded;\n  }\n  const parts = payload.parts || [];\n  for (const part of parts) {\n    if (part.body && part.body.data) {\n      const decoded = Buffer.from(part.body.data, 'base64').toString('utf-8');\n      if (part.mimeType === 'text/plain' && !bodyText) bodyText = decoded;\n      if (part.mimeType === 'text/html' && !bodyHtml) bodyHtml = decoded;\n    }\n    const subparts = part.parts || [];\n    for (const sp of subparts) {\n      if (sp.body && sp.body.data) {\n        const decoded = Buffer.from(sp.body.data, 'base64').toString('utf-8');\n        if (sp.mimeType === 'text/plain' && !bodyText) bodyText = decoded;\n        if (sp.mimeType === 'text/html' && !bodyHtml) bodyHtml = decoded;\n      }\n    }\n  }\n}\n\nconst headers = {};\nconst rawHeaders = (msg.payload && msg.payload.headers) || msg.headers || [];\nfor (const h of rawHeaders) {\n  headers[h.name.toLowerCase()] = h.value;\n}\n\nreturn [{\n  json: {\n    email_id: msg.id || msg.messageId,\n    source: source.source,\n    author: source.author,\n    subject: headers['subject'] || '',\n    published_at: headers['date'] ? new Date(headers['date']).toISOString() : null,\n    sender_email: headers['from'] || '',\n    body_html: bodyHtml,\n    body_text: bodyText,\n  }\n}];"
+        "jsCode": "// Runs in \"Run Once for All Items\" mode. MUST iterate $input.all().\n//\n// This previously read `const msg = $json`, which in all-items mode is only the\n// FIRST input item, and returned a single element. Verified against real runs:\n// executions 148835 and 147883 each fetched 6 Gmail messages and POSTed exactly 1.\n// Every additional newsletter that arrived the same day was silently discarded,\n// and because the sync window then moved on, those issues were lost permanently.\n// This was the single largest cause of the ~68% ingestion loss.\n//\n// Source/author are deliberately NOT resolved here: $('Source Config').first()\n// always returns config item #1 regardless of which email is being handled, which\n// mis-filed every issue as nik_sharma. The From header travels with the message,\n// so we forward it and /ingest-newsletter derives attribution server-side.\n\nfunction extractBody(part, result) {\n  if (!part) return;\n  if (part.body && part.body.data) {\n    const decoded = Buffer.from(part.body.data, 'base64').toString('utf-8');\n    if (part.mimeType === 'text/html' && !result.html) result.html = decoded;\n    if (part.mimeType === 'text/plain' && !result.plain) result.plain = decoded;\n  }\n  for (const p of (part.parts || [])) extractBody(p, result);\n}\n\nconst out = [];\nfor (const item of $input.all()) {\n  const msg = item.json || {};\n  const result = { html: '', plain: '' };\n  if (msg.payload) extractBody(msg.payload, result);\n\n  const headers = {};\n  for (const h of ((msg.payload && msg.payload.headers) || msg.headers || [])) {\n    if (h && h.name) headers[h.name.toLowerCase()] = h.value;\n  }\n\n  const from = headers['from'] || '';\n  // Without a From header the server cannot attribute the issue. Skip rather than\n  // let it fall back to whichever source happens to be first.\n  if (!from) continue;\n\n  let published = null;\n  if (headers['date']) {\n    const d = new Date(headers['date']);\n    if (!isNaN(d.getTime())) published = d.toISOString();\n  }\n\n  out.push({ json: {\n    email_id: msg.id || msg.messageId,\n    source: 'unknown',            // server derives the real source from sender_email\n    sender_email: from,\n    subject: headers['subject'] || '',\n    published_at: published,\n    body_html: result.html,\n    body_text: result.plain,\n  }});\n}\nreturn out;\n"
       },
       "id": "parse_body",
       "name": "Parse Email Body",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [850, 300]
+      "position": [
+        850,
+        300
+      ]
     },
     {
       "parameters": {
@@ -63,30 +81,107 @@
         "jsonBody": "={{ JSON.stringify($json) }}",
         "options": {
           "timeout": 120000
-        }
+        },
+        "method": "POST"
       },
       "id": "post_railway",
       "name": "POST to Railway",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1050, 300]
+      "position": [
+        1050,
+        300
+      ],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ $json.id }}?format=full",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "options": {}
+      },
+      "id": "fetch_full",
+      "name": "Fetch Full Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        750,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "DrHd2VFfLvVKxa8N",
+          "name": "Gmail account"
+        }
+      }
     }
   ],
   "connections": {
     "Schedule Trigger": {
-      "main": [[{ "node": "Source Config", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Source Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Source Config": {
-      "main": [[{ "node": "Fetch Gmail Messages", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Fetch Gmail Messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Fetch Gmail Messages": {
-      "main": [[{ "node": "Parse Email Body", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "Fetch Full Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Full Message": {
+      "main": [
+        [
+          {
+            "node": "Parse Email Body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     },
     "Parse Email Body": {
-      "main": [[{ "node": "POST to Railway", "type": "main", "index": 0 }]]
+      "main": [
+        [
+          {
+            "node": "POST to Railway",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
-    "executionOrder": "v1"
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "errorWorkflow": "gHG4xU2e85WEoTtJ"
   }
 }
