@@ -3391,8 +3391,10 @@ def ingest_newsletter(req: NewsletterIngestRequest):
     try:
         # Clean body
         body_text = req.body_text
-        if req.body_html and not body_text:
-            body_text = strip_html(req.body_html)
+        # Take whichever part carries more content — see pick_richest_body(). The old
+        # `if html and not text` rule let a token text/plain stub beat the real HTML
+        # issue, which is how 228 rows ended up with unextractable bodies.
+        body_text = pick_richest_body(req.body_html, body_text)
         body_text = clean_email_text(body_text)
 
         if not body_text or len(body_text) < 100:
