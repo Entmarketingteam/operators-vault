@@ -3696,10 +3696,13 @@ def topic_guide(body: TopicGuideRequest):
         if conn:
             _release_db_conn(conn)
 
-    # 2. Cache Miss: Search all content types for this topic
-    results = _search_postgres(topic, limit=30, type_="all")
-    hits = results.get("hits") or []
->>>>>>> origin/master
+    # 2. Cache Miss: Search all content types for this topic.
+    # Over-fetch, then quota down. Fetching exactly _GUIDE_CONTEXT would leave nothing
+    # to rebalance when one corpus dominates the top of the ranking — which is exactly
+    # how guides ended up citing podcast timestamps and nothing else.
+    _GUIDE_CONTEXT = 30
+    results = _search_postgres(topic, limit=_GUIDE_CONTEXT * 3, type_="all")
+    hits = _apply_source_quota(results.get("hits") or [], _GUIDE_CONTEXT)
 
     if not hits:
         # Retry with extracted keywords for broader matching (similar to /chat)
