@@ -4,12 +4,46 @@
 Searchable knowledge base of DTC operator content: podcast transcripts + newsletter archives.
 Powers RAG-based Q&A for ENT Agency internal research.
 
-## Status: LIVE ✅ (last verified 2026-07-30)
+## Status: LIVE ✅ (last verified 2026-08-01)
 - **413 videos** indexed across 5 podcast channels; 390 have extracted insights
-- **1,530 newsletter issues**; 1,187 have extracted insights
-- **~56,000 video insights + ~25,400 newsletter insights** in DB
-- ⚠️ The `newsletters.processed` flag is STALE (reads 553 vs 1,187 actually extracted).
-  Use presence of `newsletter_insights` rows as the real coverage metric, not that flag.
+- **1,530 newsletter issues**; ~1,190 have extracted insights (backlog draining, see below)
+- **~56,000 video insights + ~25,500 newsletter insights** in DB
+- `newsletters.processed` was reconciled 2026-08-01 and now matches reality on all
+  1,530 rows. It had drifted BOTH ways (45 rows TRUE with zero insights, 679 FALSE
+  that already had them). Even so, prefer the `newsletter_insights` anti-join as the
+  coverage metric — that is what the re-queue paths use, so the flag cannot silently
+  strand rows again.
+
+## ⚠️ Newsletter layer was dead from ~2026-05 to 2026-08-01 — what broke, so it isn't reintroduced
+Four independent defects, all verified against the live DB and the Gmail API:
+1. **Extraction worker threw on every job.** `_newsletter_extract_worker` selected
+   `retry_count`, a column no migration ever created → `UndefinedColumn` on the first
+   query. 2026-06 and 2026-07: 30 issues stored, **0** insights. Fixed by
+   `20260801_newsletter_extraction_repair.sql`.
+2. **Attribution corrupted.** The n8n Parse node used `$('Source Config').first()`,
+   which always returns config item #1, so every issue since ~2026-05-09 was filed as
+   `nik_sharma`. **`/ingest-newsletter` now derives source from the From header
+   server-side and treats a client-supplied `source` as a hint only.** Never
+   reintroduce caller-supplied attribution.
+3. **Dead pooled connections dropped ~68% of issues.** `newsletter_ingestor` used a
+   raw `ThreadedConnectionPool`; Supabase closes idle connections and `getconn()`
+   handed those dead sockets straight out, so the ingest POST 500'd, n8n aborted the
+   run, and the 2-day window moved past the skipped issues permanently — 137 of 200
+   issues in 100 days were lost. **Always go through `db_utils.connect()`** (probes
+   with `SELECT 1`, retries transient drops). Do not re-add a connection pool here.
+4. **Newsletters lost every search slot.** `newsletter_insights` had no `fts` column
+   and was ranked on an inline *unweighted* tsvector against `insights.fts`, which is
+   weighted — so ts_rank buried them (98 video / 2 newsletter on a 100-hit query).
+   Fixed by `20260801_newsletter_insights_fts.sql` + rank normalization + a source
+   quota in guide/chat context.
+
+## ⚠️ Duplicate `/topic-guide` route (pre-existing, not yet resolved)
+`api.py` defines `@app.post("/topic-guide")` **twice** (~line 2441 and ~line 3652).
+FastAPI matches in registration order, so **the earlier one serves and the later
+one — the version with persistent caching — is unreachable dead code.** The
+caching feature has therefore never run. The source quota is applied to the
+handler that actually serves. Decide whether to keep or delete the cached copy
+before touching this endpoint.
 
 ## ⚠️ YouTube access: no proxy, residential IP only
 YouTube blocks **datacenter** IPs, which is the only reason the Webshare proxy ever
