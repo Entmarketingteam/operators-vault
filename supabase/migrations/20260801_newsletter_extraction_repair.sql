@@ -11,10 +11,16 @@
 -- `promo_only` lands here too so the ingest-time promo gate needs no second
 -- migration.
 
+-- last_error_at is referenced by the worker's retry/dead-letter UPDATE. It was
+-- missing too, which made the failure *recorder* fail: the UPDATE threw
+-- UndefinedColumn, the surrounding handler swallowed it as a warning, and
+-- retry_count stayed 0 while extraction was quietly failing. Same bug class as
+-- retry_count, one layer deeper — the error path was never exercised.
 alter table newsletters
-  add column if not exists retry_count integer not null default 0,
-  add column if not exists last_error  text,
-  add column if not exists promo_only  boolean not null default false;
+  add column if not exists retry_count   integer not null default 0,
+  add column if not exists last_error    text,
+  add column if not exists last_error_at timestamptz,
+  add column if not exists promo_only    boolean not null default false;
 
 -- Worker re-queue scans for unextracted rows; keep that lookup cheap.
 create index if not exists newsletters_unprocessed
