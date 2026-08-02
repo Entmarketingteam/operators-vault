@@ -3310,6 +3310,22 @@ def _newsletter_extract_worker():
         except Exception:
             continue
 
+def _record_extraction_note(newsletter_id: str, note: str) -> None:
+    """Record a non-fatal extraction outcome without triggering a retry."""
+    try:
+        from newsletter_ingestor import _db_conn
+        conn = _db_conn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE newsletters SET last_error = %s, last_error_at = now() WHERE id = %s",
+                (note[:2000], newsletter_id),
+            )
+            conn.commit()
+        conn.close()
+    except Exception as e:
+        _log.warning("newsletter_note_failed", extra={"newsletter_id": newsletter_id, "error": str(e)})
+
+
 def _ensure_newsletter_worker():
     global _newsletter_worker_started
     if not _newsletter_worker_started:
