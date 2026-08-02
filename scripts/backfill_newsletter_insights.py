@@ -47,6 +47,7 @@ SELECT_BACKLOG = """
     WHERE n.body_text IS NOT NULL
       AND length(n.body_text) >= 100
       AND NOT n.promo_only
+      AND NOT n.processed
       AND NOT EXISTS (
           SELECT 1 FROM newsletter_insights ni WHERE ni.newsletter_id = n.id
       )
