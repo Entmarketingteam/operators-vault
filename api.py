@@ -136,6 +136,13 @@ def _on_startup():
                 WHERE n.body_text IS NOT NULL
                   AND length(n.body_text) >= 100
                   AND NOT n.promo_only
+                  -- NOT processed as well as no-insights: a row that has already been
+                  -- through extraction and legitimately produced nothing (truncated
+                  -- body) or dead-lettered must not be re-queued forever. `processed`
+                  -- is only written by store_newsletter_insights / mark_promo_only,
+                  -- and was reconciled to reality 2026-08-01, so it is trustworthy
+                  -- again as a terminal marker.
+                  AND NOT n.processed
                   AND NOT EXISTS (
                       SELECT 1 FROM newsletter_insights ni WHERE ni.newsletter_id = n.id
                   )
@@ -3501,6 +3508,13 @@ def process_newsletters(limit: int = 50):
                 WHERE n.body_text IS NOT NULL
                   AND length(n.body_text) >= 100
                   AND NOT n.promo_only
+                  -- NOT processed as well as no-insights: a row that has already been
+                  -- through extraction and legitimately produced nothing (truncated
+                  -- body) or dead-lettered must not be re-queued forever. `processed`
+                  -- is only written by store_newsletter_insights / mark_promo_only,
+                  -- and was reconciled to reality 2026-08-01, so it is trustworthy
+                  -- again as a terminal marker.
+                  AND NOT n.processed
                   AND NOT EXISTS (
                       SELECT 1 FROM newsletter_insights ni WHERE ni.newsletter_id = n.id
                   )
