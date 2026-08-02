@@ -3226,15 +3226,20 @@ def _newsletter_extract_worker():
                         for ins in chunk_insights:
                             ins["source_chunk"] = chunk[:500]
                         all_insights.extend(chunk_insights)
-                    if not all_insights:
-                        # Storing an empty result marks the row processed=TRUE, which
-                        # removes it from every re-queue path forever. That is how 152
-                        # issues were silently consumed with zero insights and looked
-                        # "done". A promo issue is flagged by the gate above, so
-                        # reaching here with nothing means extraction genuinely failed
-                        # — surface it to the retry/dead-letter path instead.
-                        raise RuntimeError("extraction returned 0 insights")
                     store_newsletter_insights(newsletter_id, source, all_insights)
+                    if not all_insights:
+                        # Zero insights is a legitimate outcome, not a failure:
+                        # measured 2026-08-01, 228 of 235 remaining backlog rows have
+                        # bodies under 1500 chars (113 under 600) because only a
+                        # snippet was ever captured, and there is genuinely nothing to
+                        # extract. Retrying those would spin forever. But it must not
+                        # be silent either — that is how 213 rows came to look "done"
+                        # with nothing in them. So: mark processed (above) AND record
+                        # why, so /newsletter-health and ops can see it.
+                        _record_extraction_note(
+                            newsletter_id,
+                            f"0 insights (body {len(body_text)} chars — likely a truncated capture)",
+                        )
                     _log.info(
                         "newsletter_extracted",
                         extra={"newsletter_id": newsletter_id, "insights": len(all_insights)},
