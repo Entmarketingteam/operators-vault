@@ -3226,6 +3226,14 @@ def _newsletter_extract_worker():
                         for ins in chunk_insights:
                             ins["source_chunk"] = chunk[:500]
                         all_insights.extend(chunk_insights)
+                    if not all_insights:
+                        # Storing an empty result marks the row processed=TRUE, which
+                        # removes it from every re-queue path forever. That is how 152
+                        # issues were silently consumed with zero insights and looked
+                        # "done". A promo issue is flagged by the gate above, so
+                        # reaching here with nothing means extraction genuinely failed
+                        # — surface it to the retry/dead-letter path instead.
+                        raise RuntimeError("extraction returned 0 insights")
                     store_newsletter_insights(newsletter_id, source, all_insights)
                     _log.info(
                         "newsletter_extracted",
