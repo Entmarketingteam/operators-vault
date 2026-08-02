@@ -2450,16 +2450,24 @@ def topic_guide(
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
 
-    # Search database for insights and newsletter insights
-    search_result = _search_postgres(topic, limit=body.limit, type_="all")
-    hits = search_result.get("hits") or []
+    # NOTE: there are two `@app.post("/topic-guide")` handlers in this file — this
+    # one and another further down that adds persistent caching. FastAPI matches in
+    # registration order, so THIS handler is the one that serves and the cached one
+    # below is unreachable dead code. That predates this change; flagged rather than
+    # deleted because the caching feature is someone else's call to keep or drop.
+    #
+    # Over-fetch, then quota down. Fetching exactly body.limit would leave nothing to
+    # rebalance when one corpus dominates the top of the ranking — which is exactly
+    # how guides ended up citing podcast timestamps and nothing else.
+    search_result = _search_postgres(topic, limit=body.limit * 3, type_="all")
+    hits = _apply_source_quota(search_result.get("hits") or [], body.limit)
 
     # If no hits, fallback to OR keyword query
     if not hits:
         kw_query = _extract_keywords(topic)
         if kw_query and kw_query.replace(" OR ", " ").strip() != topic.lower().strip():
-            search_result = _search_postgres(kw_query, limit=body.limit, type_="all")
-            hits = search_result.get("hits") or []
+            search_result = _search_postgres(kw_query, limit=body.limit * 3, type_="all")
+            hits = _apply_source_quota(search_result.get("hits") or [], body.limit)
 
     if not hits:
         raise HTTPException(status_code=404, detail="No matching insights found in the vault for this topic.")
