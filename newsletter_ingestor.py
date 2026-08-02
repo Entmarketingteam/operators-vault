@@ -385,8 +385,7 @@ def ingest_email(
     Returns {"email_id", "newsletter_id", "is_new", "insights_count", "status"}.
     """
     # Clean body
-    if body_html and not body_text:
-        body_text = strip_html(body_html)
+    body_text = pick_richest_body(body_html, body_text)
     body_text = clean_email_text(body_text)
 
     if not body_text or len(body_text) < 100:
