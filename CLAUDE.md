@@ -88,12 +88,35 @@ git push
 | `finance_operators` | @FinanceOperatorsFOPS | `UChL5rAxddwU_EnbhZofhDjw` |
 | `titans` | @Operators9 (TITANS series) | `UCuGneytUApsb7SEynqoZ0ug` |
 
-### Newsletter Sources (5)
-1. Nik Sharma
-2. Taylor Holiday / CTC
-3. Matt Bertulli
-4. Chase Dimond
-5. Operators Newsletter
+### Newsletter Sources (7)
+Configured in the `newsletter_source_configs` table (DB-driven). The dict in
+`newsletter_ingestor._NEWSLETTER_SOURCES_FALLBACK` is only a fallback for when that
+table is unreachable — keep the two in sync.
+⚠️ `NEWSLETTER_SOURCES` loads at **module import time**, so adding a row requires a
+Railway restart before the new source is accepted.
+
+| Slug | Author | Sender |
+|------|--------|--------|
+| `nik_sharma` | Nik Sharma | niksharma@workweek.com |
+| `taylor_holiday` | Taylor Holiday / CTC | taylorholiday@commonthreadco.com |
+| `matt_bertulli` | Matt Bertulli | m@mattbertulli.com |
+| `chase_dimond` | Chase Dimond | chase@chasedimond.com, ecomemailmarketer@mail.beehiiv.com |
+| `operators_newsletter` | Operators Newsletter | news@operatorscontent.com |
+| `jordan_west` | Jordan West (Social Commerce Club) | jordanwestnewsletter@mail.beehiiv.com |
+| `chew_on_this` | Chew On This (Obvi) | chew-on-this@mail.beehiiv.com |
+
+`unclassified` is a reserved slug for issues whose sender could not be resolved —
+they are quarantined there, never guessed and never dropped.
+
+**Not subscribed** (verified absent from the mailbox 2026-08-01, searched all folders
+including spam/trash): Cody Plofker, Andrew Faris / AJF Growth. Adding them needs a
+subscribe from marketingteam@nickient.com, not a code change.
+
+**Promo gate:** Jordan West and Chew On This run 30-50% promo (webinar invites,
+agency hiring posts). `newsletter_ingestor.is_promo_only()` runs before extraction and
+flags those `promo_only`, storing zero insights. It samples head+middle+tail — judging
+on the first N chars misclassifies sponsor-funded issues, because the sponsor block
+sits above the substance.
 
 ---
 
