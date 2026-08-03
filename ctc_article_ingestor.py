@@ -60,11 +60,25 @@ _UA = (
     "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
 )
 
-# Below this an article carries no operator idea worth an extraction pass. The
-# shortest genuine long-form page sampled was 1,567 chars (bridges-live); podcast
-# show notes averaged 1,122. Template detection is the primary gate — this is the
-# backstop for blogs that were never sampled.
-MIN_ARTICLE_CHARS = 1000
+# Template detection is the real gate — podcast show notes are excluded by template,
+# not by length, so this floor exists only to catch extraction FAILURE.
+#
+# It was 1000 and that was wrong: CTC's older coachs-corner posts are genuinely short
+# (`marginal-frontier` 848 chars, `can-you-say-dpa` 772) and `marginal-frontier` is
+# exactly the Taylor material this whole job exists to capture. A length floor tuned
+# to exclude show notes silently deletes his short posts.
+MIN_ARTICLE_CHARS = 400
+
+# An article-template page yielding less than this almost certainly means the selectors
+# missed, not that the post is short. Those are QUARANTINED and surfaced in the run
+# handoff — never silently skipped (traps.md T4: quarantine what you can't classify).
+EXTRACTION_FAILURE_CHARS = 250
+
+
+class RateLimited(Exception):
+    """CTC returned 429. Burst-based: the site tolerates a low steady rate and blocks
+    bursts (measured 2026-08-02 — 6 concurrent requests tripped it, and it escalates
+    from 429 to refusing connections entirely). Callers must back off, not retry hot."""
 
 
 # ── Fetch ──────────────────────────────────────────────────────────────────────
