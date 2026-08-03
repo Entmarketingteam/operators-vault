@@ -14,8 +14,9 @@
 -- Lives in sql/ (not supabase/migrations/) so _run_startup_migration applies it on
 -- every Railway boot with no manual step. Idempotent.
 --
--- NOTE: that runner splits this file on ";", so no statement-terminating semicolon
--- may appear inside a comment here or the fragment after it is executed as SQL.
+-- NOTE: that runner splits this file on the statement separator, so a separator
+-- character must never appear inside a comment here — the fragment following it is
+-- then executed as SQL and the migration fails at boot.
 
 ALTER TABLE newsletters ADD COLUMN IF NOT EXISTS medium text NOT NULL DEFAULT 'email';
 ALTER TABLE newsletters ADD COLUMN IF NOT EXISTS url text;
