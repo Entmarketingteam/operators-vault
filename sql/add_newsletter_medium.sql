@@ -7,12 +7,15 @@
 --
 -- 'email'        — ingested from Gmail (every pre-existing row)
 -- 'article'      — evergreen long-form from commonthreadco.com
--- 'article_news' — platform-news roundup; stored but down-weighted in search, because
+-- 'article_news' — platform-news roundup, stored but down-weighted in search, because
 --                  ~13-25% of recent coachs-corner is AI-written "this week in ad
 --                  platforms" content that would otherwise flood the newest slots.
 --
 -- Lives in sql/ (not supabase/migrations/) so _run_startup_migration applies it on
 -- every Railway boot with no manual step. Idempotent.
+--
+-- NOTE: that runner splits this file on ";", so no statement-terminating semicolon
+-- may appear inside a comment here or the fragment after it is executed as SQL.
 
 ALTER TABLE newsletters ADD COLUMN IF NOT EXISTS medium text NOT NULL DEFAULT 'email';
 ALTER TABLE newsletters ADD COLUMN IF NOT EXISTS url text;
