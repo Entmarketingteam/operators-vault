@@ -103,6 +103,37 @@ def fetch(url: str, timeout: int = 45) -> str:
     return raw.decode("utf-8", "replace")
 
 
+# Full-jitter backoff, per escalation.md. CTC sends no Retry-After header, so the
+# schedule is ours to pick — and it escalates from 429 to refusing connections
+# outright, so the first wait is deliberately long rather than the usual 2s.
+_BACKOFF_BASE, _BACKOFF_CAP, _BACKOFF_ATTEMPTS = 8, 300, 5
+
+
+def fetch_polite(url: str, attempts: int = _BACKOFF_ATTEMPTS, timeout: int = 45) -> str:
+    """`fetch` with backoff on 429 only.
+
+    429 here is a whole-run condition, not a per-item fault: while it is firing every
+    URL fails identically, so retrying the same URL IS the correct behaviour and
+    quarantining the item would be wrong. Non-429 errors are raised immediately so the
+    caller can classify them per item.
+    """
+    import random
+    import time
+
+    last: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return fetch(url, timeout=timeout)
+        except RateLimited as e:
+            last = e
+            if attempt == attempts - 1:
+                break
+            wait = min(_BACKOFF_CAP, _BACKOFF_BASE * (2 ** attempt) * (0.5 + random.random()))
+            time.sleep(wait)
+    assert last is not None
+    raise last
+
+
 # ── Enumeration ────────────────────────────────────────────────────────────────
 
 def enumerate_articles() -> list[dict]:
