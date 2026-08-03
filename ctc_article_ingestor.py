@@ -484,9 +484,7 @@ def ingest_article(url: str, row: dict | None = None) -> dict:
     Show notes are never stored. Everything else lands and is extracted with the same
     chunker and prompt the newsletters use.
     """
-    from newsletter_ingestor import (
-        chunk_text, extract_newsletter_insights, store_newsletter_insights,
-    )
+    from newsletter_ingestor import chunk_text, store_newsletter_insights
 
     if row is None:
         row = fetch_and_parse(url)
