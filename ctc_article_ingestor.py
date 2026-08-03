@@ -335,6 +335,39 @@ def parse_article(url: str, html_text: str, published_at: str | None = None) -> 
     }
 
 
+def extract_article_insights(text: str, title: str = "") -> list[dict[str, str]]:
+    """Extract insights with the article's provenance stated up front.
+
+    Reuses the newsletters prompt rather than forking it — but that prompt opens by
+    naming five newsletter authors and asks for "quotes from the author", and a CTC
+    article carries no From header to tell the model who wrote it. Run unframed, it
+    invents attributions: a real 2026-08-02 test on "26 Predictions for Commerce"
+    produced quote titles reading "(Operators Newsletter author)", "Author", and
+    "Newsletter author, on nearshoring to Mexico". Naming the publication and author
+    in the content itself fixes it without duplicating a 98-line prompt that would
+    then drift out of sync.
+    """
+    from insight_extractor import (
+        _anthropic_message, _load_prompt, parse_extract_insights_output,
+    )
+
+    tpl = _load_prompt("extract_insights_system", prompt_set="newsletters")
+    if not tpl:
+        return []
+    framed = (
+        "[SOURCE: a long-form article published by Common Thread Collective (CTC) at "
+        "commonthreadco.com — not an email newsletter. The author is Taylor Holiday / "
+        "CTC unless the text names someone else. Attribute quotes to the person the "
+        "text names, or to Taylor Holiday when unattributed. Never attribute anything "
+        "to a 'newsletter author' or to another newsletter's author.]\n\n"
+        f"ARTICLE TITLE: {title}\n\n{text}"
+    )
+    user = tpl.replace("{transcript}", framed)
+    system = "You are an expert DTC and eCommerce operator analyst. Follow the instructions exactly."
+    raw = _anthropic_message(system, user, model="claude-haiku-4-5-20251001")
+    return parse_extract_insights_output(raw)
+
+
 def source_from_url(url: str) -> str | None:
     """Derive the source slug from the URL host — never from a caller-supplied field.
 
