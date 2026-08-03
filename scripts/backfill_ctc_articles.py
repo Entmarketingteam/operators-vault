@@ -57,6 +57,15 @@ JOB_NAME = "vault-ctc-article-backfill"
 BASE, CAP, MAX_ATTEMPTS = 8, 300, 4
 SCHEDULE_INTERVAL_SEC = 24 * 3600
 
+# ⚠️ The operators-vault Supabase project. This guard is not paranoia — it is
+# traps.md T6 firing in practice. Running this job under
+# `doppler run --project ent-agency-automation` overrides SUPABASE_URL with
+# `abhhegllhwbmanwvqanc`, the creatormetrics project that is EMPTY in every table.
+# Verified 2026-08-02: only a 401 on a mismatched service-role key stopped that run,
+# and a matching key would have made it succeed silently against the wrong database.
+# The vault's own credentials live in this repo's gitignored .env.
+EXPECTED_PROJECT_REF = "wbdwnlzbgugewtmvahwg"
+
 # The CTC podcast archive. Excluded at enumeration so the job never spends a paced
 # request on a page the classifier would discard anyway (~1,100 chars of show notes).
 PODCAST_BLOGS = {"ecommerce-playbook", "dtc-hotline"}
