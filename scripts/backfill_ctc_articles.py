@@ -224,15 +224,31 @@ def main() -> int:
     if missing_env:
         fails.append("env")
 
+    # Print the project ref BEFORE any write and match it against the expected one.
+    # A wrong-project run is silent: reads return empty sets rather than errors.
     ref = "?"
-    try:
-        m = re.search(r"https://([a-z0-9]+)\.supabase", SB_URL)
-        ref = m.group(1) if m else "?"
-        sb_get(f"job_checkpoints?select=item_key&limit=1&job_name=eq.{JOB_NAME}")
-        print(f"[2] state: job_checkpoints reachable, project={ref} ....... OK")
-    except Exception as e:
-        print(f"[2] state: job_checkpoints reachable, project={ref} ....... FAIL {e}")
-        fails.append("state")
+    m = re.search(r"https://([a-z0-9]+)\.supabase", SB_URL)
+    ref = m.group(1) if m else "?"
+    db_ref = "?"
+    db_url = os.environ.get("DATABASE_URL", "")
+    md = re.search(r"(?:postgres(?:ql)?://[^@]*@)?(?:db\.)?([a-z0-9]{20})\.", db_url)
+    if not md:
+        md = re.search(r"postgres\.([a-z0-9]{20})[:@]", db_url)
+    db_ref = md.group(1) if md else "?"
+
+    if ref != EXPECTED_PROJECT_REF or (db_ref != "?" and db_ref != EXPECTED_PROJECT_REF):
+        print(f"[2] state: WRONG PROJECT — SUPABASE_URL={ref} DATABASE_URL={db_ref}, "
+              f"expected {EXPECTED_PROJECT_REF} ....... FAIL")
+        print("     Refusing to run. Do not 'fix' this by editing the env var name — "
+              "run from the repo's own .env, not another Doppler project.")
+        fails.append("wrong_project")
+    else:
+        try:
+            sb_get(f"job_checkpoints?select=item_key&limit=1&job_name=eq.{JOB_NAME}")
+            print(f"[2] state: job_checkpoints reachable, project={ref} ....... OK")
+        except Exception as e:
+            print(f"[2] state: job_checkpoints reachable, project={ref} ....... FAIL {e}")
+            fails.append("state")
 
     pending = []
     try:
