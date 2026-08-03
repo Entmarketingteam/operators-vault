@@ -427,12 +427,9 @@ def ingest_article(url: str, row: dict | None = None) -> dict:
     if row is None:
         row = fetch_and_parse(url)
 
-    if row["kind"] == "shownotes":
-        return {"url": url, "status": "skipped_shownotes", "chars": row["chars"],
-                "insights_count": 0}
-    if not row["body_text"] or row["chars"] < MIN_ARTICLE_CHARS:
-        return {"url": url, "status": "skipped_short", "chars": row["chars"],
-                "insights_count": 0}
+    if row["kind"] in ("shownotes", "thin", "extraction_failed"):
+        return {"url": url, "status": f"skipped_{row['kind']}", "kind": row["kind"],
+                "chars": row["chars"], "insights_count": 0}
 
     nl_id, needs_extraction = upsert_article(row)
     if not needs_extraction:
