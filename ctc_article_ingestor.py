@@ -84,10 +84,20 @@ class RateLimited(Exception):
 # ── Fetch ──────────────────────────────────────────────────────────────────────
 
 def fetch(url: str, timeout: int = 45) -> str:
-    """GET a URL as text. Raises on HTTP error so the caller's retry can classify it."""
+    """GET a URL as text. Raises so the caller's retry policy can classify the failure.
+
+    429 is raised as `RateLimited` specifically: it is not a per-item fault (the next
+    URL fails identically), so a caller must slow the whole run down rather than
+    quarantine the item.
+    """
     req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept-Encoding": "gzip"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        raw = r.read()
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read()
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            raise RateLimited(f"429 on {url}") from e
+        raise
     if raw[:2] == b"\x1f\x8b":
         raw = gzip.decompress(raw)
     return raw.decode("utf-8", "replace")
