@@ -96,11 +96,28 @@ def _run_startup_migration() -> None:
             conn.autocommit = True
             with conn.cursor() as cur:
                 sql = migration_path.read_text(encoding="utf-8")
-                # Execute each statement separated by semicolons, skip blank/comment-only
+                # Execute each statement separated by semicolons, skip blank/comment-only.
+                #
+                # The test used to be `stmt.startswith("--")`, which silently skipped the
+                # ENTIRE first statement of any file opening with a comment header — the
+                # comment and the statement land in the same split fragment. Three of the
+                # five migrations here start with a comment, and the damage was real:
+                # `channel_configs` was never created (so /channels quietly ran on its
+                # hardcoded fallback), and migrate_newsletter_retry.sql never applied,
+                # which is the actual root cause of CLAUDE.md defect #1 — the extraction
+                # worker selecting a `retry_count` column "no migration ever created".
+                # The migration existed. It was skipped at boot, every boot, silently.
+                #
+                # Strip comment lines first, then decide. Note this splitter is still
+                # naive about semicolons inside comments or string literals, so migration
+                # files must not contain either.
                 for stmt in sql.split(";"):
-                    stmt = stmt.strip()
-                    if stmt and not stmt.startswith("--"):
-                        cur.execute(stmt)
+                    body = "\n".join(
+                        line for line in stmt.splitlines()
+                        if not line.strip().startswith("--")
+                    ).strip()
+                    if body:
+                        cur.execute(body)
             conn.close()
             _log.info("startup_migration_ok", extra={"file": migration_name})
         except Exception as e:
