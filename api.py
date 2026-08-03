@@ -3224,7 +3224,8 @@ def _newsletter_extract_worker():
                 conn = _db_conn()
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT processed, COALESCE(retry_count, 0), subject FROM newsletters WHERE id = %s",
+                        "SELECT processed, COALESCE(retry_count, 0), subject, "
+                        "COALESCE(medium, 'email') FROM newsletters WHERE id = %s",
                         (newsletter_id,),
                     )
                     row = cur.fetchone()
@@ -3234,10 +3235,18 @@ def _newsletter_extract_worker():
                     continue
                 retry_count = int(row[1] or 0)
                 subject = row[2] or ""
+                medium = row[3] or "email"
+                # Medium is read from the row rather than passed on the queue so the
+                # startup re-queue path routes correctly too, without changing the
+                # queue's tuple contract for existing producers.
+                is_article = medium != "email"
                 # Promo gate lives here rather than in the endpoint so it covers both
                 # the live n8n path and every re-queue, and so the HTTP response is
-                # not held open for a classifier call.
-                if is_promo_only(body_text, subject):
+                # not held open for a classifier call. Articles skip it: they were
+                # already classified at ingest by ctc_article_ingestor, and CTC's
+                # "book a call" footer CTAs would trip the promo markers on real
+                # long-form pieces.
+                if not is_article and is_promo_only(body_text, subject):
                     mark_promo_only(newsletter_id)
                     _log.info("newsletter_promo_skipped",
                               extra={"newsletter_id": newsletter_id, "subject": subject[:80]})
