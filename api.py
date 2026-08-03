@@ -3434,6 +3434,80 @@ def ingest_newsletter(req: NewsletterIngestRequest):
         raise HTTPException(status_code=500, detail=f"Ingestion failed: {e!s}")
 
 
+# ── CTC article sync ───────────────────────────────────────────────────────────
+
+# Blogs whose atom feeds carry evergreen operator content. `ecommerce-playbook` and
+# `dtc-hotline` are the CTC podcast — ~1,100 chars of show notes per episode — and are
+# excluded here as well as by template detection, so the sync never spends requests on
+# them. The classifier is still the authority: anything on the podcast template is
+# dropped even if a handle appears below.
+_CTC_SYNC_BLOGS = (
+    "coachs-corner", "thread", "bridges", "outliers", "tactics",
+    "sharpen-your-skills", "bridges-live", "upgrade-your-culture",
+    "taylor-reacts", "research",
+)
+
+
+@app.post("/sync-ctc-articles")
+def sync_ctc_articles(blogs: str = "", dry_run: bool = False):
+    """Pull new commonthreadco.com articles from the blogs' atom feeds.
+
+    The entire walk lives server-side on purpose. The newsletter sync put its
+    per-message loop in an n8n Code node, that node ran in *Run Once for All Items*
+    mode where `$json` is only the FIRST input item, and every run POSTed exactly one
+    email no matter how many Gmail returned — the single largest cause of the ~68%
+    ingestion loss. n8n's job here is one scheduled HTTP call with no expression logic,
+    so that bug class cannot recur.
+
+    Atom feeds carry the full article HTML in `<content>`, so this needs no page
+    fetches and no scraping. They cap at ~30 entries per blog and ignore pagination —
+    historical coverage is `scripts/backfill_ctc_articles.py`, not this endpoint.
+    """
+    import ctc_article_ingestor as ctc
+
+    wanted = [b.strip() for b in blogs.split(",") if b.strip()] or list(_CTC_SYNC_BLOGS)
+    summary = {"blogs": {}, "queued": 0, "duplicates": 0, "skipped": 0, "errors": 0}
+
+    for blog in wanted:
+        try:
+            entries = ctc.fetch_recent(blog)
+        except Exception as e:
+            summary["blogs"][blog] = {"error": str(e)[:120]}
+            summary["errors"] += 1
+            _log.warning("ctc_sync_feed_failed", extra={"blog": blog, "error": str(e)})
+            continue
+
+        stats = {"seen": len(entries), "queued": 0, "duplicates": 0, "skipped": 0}
+        for row in entries:
+            if row["kind"] in ("shownotes", "thin", "extraction_failed"):
+                stats["skipped"] += 1
+                continue
+            if dry_run:
+                stats["queued"] += 1
+                continue
+            try:
+                nl_id, needs_extraction = ctc.upsert_article(row)
+            except Exception as e:
+                summary["errors"] += 1
+                _log.warning("ctc_sync_upsert_failed",
+                             extra={"url": row["url"], "error": str(e)})
+                continue
+            if not needs_extraction:
+                stats["duplicates"] += 1
+                continue
+            _ensure_newsletter_worker()
+            _newsletter_extract_queue.put((nl_id, row["source"], row["body_text"]))
+            stats["queued"] += 1
+
+        summary["blogs"][blog] = stats
+        for k in ("queued", "duplicates", "skipped"):
+            summary[k] += stats[k]
+
+    summary["dry_run"] = dry_run
+    _log.info("ctc_sync_done", extra=summary)
+    return summary
+
+
 @app.get("/newsletter-health")
 def newsletter_health(stale_days: int = 10):
     """Report per-source freshness and extraction health.
