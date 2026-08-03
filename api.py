@@ -3256,7 +3256,14 @@ def _newsletter_extract_worker():
                     chunks = chunk_text(body_text)
                     all_insights = []
                     for chunk in chunks:
-                        chunk_insights = extract_newsletter_insights(chunk)
+                        if is_article:
+                            # Articles carry no From header, so the newsletter prompt
+                            # invents quote attributions ("(Operators Newsletter
+                            # author)") unless the provenance is stated in-content.
+                            from ctc_article_ingestor import extract_article_insights
+                            chunk_insights = extract_article_insights(chunk, subject)
+                        else:
+                            chunk_insights = extract_newsletter_insights(chunk)
                         for ins in chunk_insights:
                             ins["source_chunk"] = chunk[:500]
                         all_insights.extend(chunk_insights)
