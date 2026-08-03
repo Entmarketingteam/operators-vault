@@ -238,16 +238,22 @@ _NEWS_MARKERS = (
 
 
 def classify_article(title: str, body: str, template: str) -> str:
-    """'shownotes' | 'article_news' | 'substantive'.
+    """'shownotes' | 'extraction_failed' | 'thin' | 'article_news' | 'substantive'.
 
     Runs BEFORE extraction, mirroring `newsletter_ingestor.is_promo_only()`. A
     zero-insight extraction result is not an acceptable substitute: it costs a full
     multi-chunk Claude pass per item and cannot distinguish "thin" from "extraction
     failed", so the two get conflated in coverage metrics — the exact silent failure
-    the newsletter layer spent three months in.
+    the newsletter layer spent three months in. Those two outcomes are separate
+    verdicts here for that reason: `thin` is a real short post, `extraction_failed`
+    means the selectors missed and a human should look.
     """
-    if template == "podcast" or len(body) < MIN_ARTICLE_CHARS:
+    if template == "podcast":
         return "shownotes"
+    if len(body) < EXTRACTION_FAILURE_CHARS:
+        return "extraction_failed"
+    if len(body) < MIN_ARTICLE_CHARS:
+        return "thin"
 
     blob = f"{title}\n{body[:2000]}".lower()
     if not any(marker in blob for marker in _NEWS_MARKERS):
