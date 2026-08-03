@@ -3465,7 +3465,29 @@ _CTC_SYNC_BLOGS = (
 
 
 @app.post("/sync-ctc-articles")
-def sync_ctc_articles(blogs: str = "", dry_run: bool = False):
+def sync_ctc_articles(blogs: str = "", dry_run: bool = False, wait: bool = False):
+    """Kick off the CTC article sync. Returns immediately unless `wait=true`.
+
+    The walk is backed by full-jitter retry against CTC's 429s, so a rate-limited run
+    can legitimately sit for minutes per blog — long enough for n8n's HTTP node to
+    time out and report a failure for a sync that actually succeeded. Scheduled
+    callers therefore fire and forget; the summary goes to the logs, and staleness is
+    already covered by /newsletter-health, which tracks `taylor_holiday` (articles
+    share his slug). Pass `wait=true` for a manual run where you want the numbers back.
+    """
+    if wait:
+        return _run_ctc_sync(blogs=blogs, dry_run=dry_run)
+
+    import threading
+
+    threading.Thread(
+        target=_run_ctc_sync, kwargs={"blogs": blogs, "dry_run": dry_run}, daemon=True
+    ).start()
+    return {"status": "started", "dry_run": dry_run,
+            "blogs": [b.strip() for b in blogs.split(",") if b.strip()] or list(_CTC_SYNC_BLOGS)}
+
+
+def _run_ctc_sync(blogs: str = "", dry_run: bool = False):
     """Pull new commonthreadco.com articles from the blogs' atom feeds.
 
     The entire walk lives server-side on purpose. The newsletter sync put its
