@@ -21,8 +21,8 @@
 ALTER TABLE newsletters ADD COLUMN IF NOT EXISTS medium text NOT NULL DEFAULT 'email';
 ALTER TABLE newsletters ADD COLUMN IF NOT EXISTS url text;
 
--- Search joins newsletters to filter/down-weight by medium; source+medium is the
--- access pattern (e.g. "taylor_holiday, evergreen articles only").
+-- Search joins newsletters to filter/down-weight by medium. The access pattern is
+-- source+medium (e.g. "taylor_holiday, evergreen articles only").
 CREATE INDEX IF NOT EXISTS idx_newsletters_medium ON newsletters (medium);
 CREATE INDEX IF NOT EXISTS idx_newsletters_source_medium ON newsletters (source, medium);
 
