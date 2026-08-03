@@ -142,7 +142,7 @@ def enumerate_articles() -> list[dict]:
     Returns [{url, blog, handle, lastmod}]. Sitemap entries with fewer than two path
     segments after /blogs/ are blog index pages, not articles, and are dropped.
     """
-    xml = fetch(SITEMAP_URL, timeout=90)
+    xml = fetch_polite(SITEMAP_URL, timeout=90)
     out = []
     for m in re.finditer(r"<url>(.*?)</url>", xml, re.S):
         block = m.group(1)
@@ -177,7 +177,7 @@ def build_date_index(blogs: list[str]) -> dict[str, str]:
     index: dict[str, str] = {}
     for blog in blogs:
         try:
-            xml = fetch(f"https://{SITE_HOST}/blogs/{blog}.atom", timeout=45)
+            xml = fetch_polite(f"https://{SITE_HOST}/blogs/{blog}.atom", timeout=45)
         except Exception:
             continue
         for entry in re.findall(r"<entry>(.*?)</entry>", xml, re.S):
@@ -348,7 +348,7 @@ def source_from_url(url: str) -> str | None:
 
 
 def fetch_and_parse(url: str, published_at: str | None = None) -> dict:
-    return parse_article(url, fetch(url), published_at)
+    return parse_article(url, fetch_polite(url), published_at)
 
 
 # ── Sync path (atom feeds) ─────────────────────────────────────────────────────
@@ -361,7 +361,7 @@ def fetch_recent(blog: str) -> list[dict]:
     """
     import html as _html
 
-    xml = fetch(f"https://{SITE_HOST}/blogs/{blog}.atom", timeout=45)
+    xml = fetch_polite(f"https://{SITE_HOST}/blogs/{blog}.atom", timeout=45)
     out = []
     for entry in re.findall(r"<entry>(.*?)</entry>", xml, re.S):
         link = re.search(r'<link[^>]*href="([^"]+)"', entry)
