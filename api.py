@@ -85,6 +85,7 @@ def _run_startup_migration() -> None:
         "add_host_fields.sql",
         "migrate_newsletter_retry.sql",
         "add_topic_guides.sql",
+        "add_newsletter_medium.sql",
     ):
         migration_path = _root / "sql" / migration_name
         if not migration_path.exists():
