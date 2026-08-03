@@ -1,0 +1,432 @@
+"""
+CTC (commonthreadco.com) long-form article ingestion for Operators Vault.
+
+Why this exists
+---------------
+`taylor_holiday` is the weakest source in the vault per issue — 130 issues / 728
+insights (5.6 per issue) against Chase Dimond's 18.9 and Nik Sharma's 38.8, with an
+average body of 3,856 chars. That is not a pipeline failure: his *emails* are short
+sales copy that drive to the site. The substance — four-quarter accounting, OPEX
+floor, unit economics — is published as articles on commonthreadco.com and had never
+been ingested.
+
+Articles land in the SAME `newsletters` / `newsletter_insights` tables under the same
+`taylor_holiday` slug, distinguished by `newsletters.medium`. Everything downstream
+(the weighted `fts` index, rank normalization, the guide/chat source quota, the
+InsightModal sibling loader, the speaker-page fallback) already understands
+newsletter_insights; a separate `articles` table would mean re-doing all of it for a
+document of identical shape.
+
+Probe findings this file encodes (2026-08-02, verified against the live site)
+---------------------------------------------------------------------------
+1. Enumeration: `sitemap_blogs_1.xml` → 722 article URLs across 13 blog handles.
+2. ⚠️ Generic extractors DO NOT work here. `defuddle parse <url> --md` returned 892
+   bytes of nav chrome and zero body, and there is NO JSON-LD on any page (0
+   `application/ld+json` blocks on both templates). Two hand-written selectors
+   resolved 99/99 sampled pages. Do not swap this for a readability library.
+3. ⚠️ The `.atom` feed is a SYNC path, never a BACKFILL path: it caps at 30 entries
+   and silently ignores pagination — `?page=1`, `?page=2` and `?page=8` returned
+   byte-identical 356,076-byte responses. Backfill must walk the sitemap.
+4. Article pages carry NO publish date — no `<time>`, no `datetime=`, no
+   `article:published_time`. Dates come from the atom feeds where available (true
+   publish time, ~30 newest per blog) and fall back to sitemap `<lastmod>`, which is
+   an *update* time. See `build_date_index()`.
+5. Half the corpus is the CTC podcast archive (`ecommerce-playbook`, `dtc-hotline`)
+   at ~1,122 chars of show notes. Those are classified `shownotes` and never stored —
+   307+ thin rows would dilute the source without adding operator substance.
+"""
+from __future__ import annotations
+
+import gzip
+import re
+import urllib.error
+import urllib.request
+from datetime import datetime, timezone
+
+SITEMAP_URL = "https://commonthreadco.com/sitemap_blogs_1.xml"
+SITE_HOST = "commonthreadco.com"
+
+# Articles merge into Taylor's existing source so the two media meet on his speaker
+# page and in per-source counts. `medium` carries the distinction where it matters.
+SOURCE_SLUG = "taylor_holiday"
+SOURCE_AUTHOR = "Taylor Holiday / CTC"
+
+MEDIUM_EMAIL = "email"
+MEDIUM_ARTICLE = "article"
+MEDIUM_ARTICLE_NEWS = "article_news"
+
+_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+)
+
+# Below this an article carries no operator idea worth an extraction pass. The
+# shortest genuine long-form page sampled was 1,567 chars (bridges-live); podcast
+# show notes averaged 1,122. Template detection is the primary gate — this is the
+# backstop for blogs that were never sampled.
+MIN_ARTICLE_CHARS = 1000
+
+
+# ── Fetch ──────────────────────────────────────────────────────────────────────
+
+def fetch(url: str, timeout: int = 45) -> str:
+    """GET a URL as text. Raises on HTTP error so the caller's retry can classify it."""
+    req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept-Encoding": "gzip"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        raw = r.read()
+    if raw[:2] == b"\x1f\x8b":
+        raw = gzip.decompress(raw)
+    return raw.decode("utf-8", "replace")
+
+
+# ── Enumeration ────────────────────────────────────────────────────────────────
+
+def enumerate_articles() -> list[dict]:
+    """All article URLs from the blog sitemap.
+
+    Returns [{url, blog, handle, lastmod}]. Sitemap entries with fewer than two path
+    segments after /blogs/ are blog index pages, not articles, and are dropped.
+    """
+    xml = fetch(SITEMAP_URL, timeout=90)
+    out = []
+    for m in re.finditer(r"<url>(.*?)</url>", xml, re.S):
+        block = m.group(1)
+        loc = re.search(r"<loc>([^<]+)</loc>", block)
+        if not loc:
+            continue
+        url = loc.group(1).strip()
+        if "/blogs/" not in url:
+            continue
+        parts = url.split("/blogs/", 1)[1].split("/")
+        if len(parts) < 2 or not parts[1]:
+            continue
+        lastmod = re.search(r"<lastmod>([^<]+)</lastmod>", block)
+        out.append({
+            "url": url,
+            "blog": parts[0],
+            "handle": parts[1],
+            "lastmod": lastmod.group(1).strip() if lastmod else None,
+        })
+    return out
+
+
+def build_date_index(blogs: list[str]) -> dict[str, str]:
+    """URL -> true published timestamp, from each blog's atom feed.
+
+    The feeds carry only the ~30 newest entries per blog and ignore pagination, so
+    this covers recent articles only. Everything older falls back to sitemap
+    `<lastmod>`, which is an UPDATE time — a 2020 article edited in 2026 will sort as
+    2026. Accepted: the alternative is no date at all, and the newest articles (the
+    ones that sort to the top) are exactly the ones this resolves correctly.
+    """
+    index: dict[str, str] = {}
+    for blog in blogs:
+        try:
+            xml = fetch(f"https://{SITE_HOST}/blogs/{blog}.atom", timeout=45)
+        except Exception:
+            continue
+        for entry in re.findall(r"<entry>(.*?)</entry>", xml, re.S):
+            link = re.search(r'<link[^>]*href="([^"]+)"', entry)
+            pub = re.search(r"<published>([^<]+)</published>", entry)
+            if link and pub:
+                index[link.group(1).strip()] = pub.group(1).strip()
+    return index
+
+
+# ── Body extraction ────────────────────────────────────────────────────────────
+
+# Ordered by specificity. `bc-content` wraps long-form articles; `description` wraps
+# podcast episode show notes. Both were confirmed on 99/99 sampled pages.
+_BODY_WRAPPERS = ("bc-content", "description", "rte", "article-body")
+
+
+def _scan_div(html_text: str, start: int) -> str:
+    """Return the inner HTML of the div opening at `start`, matching nesting depth."""
+    depth = 1
+    for m in re.finditer(r"<(/?)div\b", html_text[start:]):
+        depth += -1 if m.group(1) else 1
+        if depth == 0:
+            return html_text[start:start + m.start()]
+    return html_text[start:]
+
+
+def _to_text(fragment: str) -> str:
+    """HTML fragment -> readable text, preserving paragraph breaks."""
+    import html as _html
+
+    fragment = re.sub(r"<(style|script)[^>]*>[\s\S]*?</\1>", "", fragment, flags=re.I)
+    fragment = re.sub(r"<(br|p|div|h[1-6]|li|tr)[^>]*>", "\n", fragment, flags=re.I)
+    fragment = re.sub(r"<[^>]+>", "", fragment)
+    fragment = _html.unescape(fragment)
+    fragment = re.sub(r"[ \t]+", " ", fragment)
+    fragment = re.sub(r"\n{3,}", "\n\n", fragment)
+    return fragment.strip()
+
+
+def detect_template(html_text: str) -> str:
+    """'podcast' | 'article'. Read off the theme's own body class."""
+    m = re.search(r'class="blog-article-bg ([^"]*)"', html_text)
+    return "podcast" if (m and "podcast" in m.group(1)) else "article"
+
+
+def extract_title(html_text: str) -> str:
+    import html as _html
+
+    m = re.search(r'<meta[^>]*property="og:title"[^>]*content="([^"]*)"', html_text)
+    if not m:
+        m = re.search(r'<meta[^>]*content="([^"]*)"[^>]*property="og:title"', html_text)
+    if not m:
+        m = re.search(r"<title>(.*?)</title>", html_text, re.S)
+    return _html.unescape(m.group(1)).strip() if m else ""
+
+
+def extract_body(html_text: str) -> str:
+    """Longest text block across the known wrappers. Empty string if none match."""
+    best = ""
+    for wrapper in _BODY_WRAPPERS:
+        pattern = r'<div[^>]*class="[^"]*\b' + re.escape(wrapper) + r'\b[^"]*"[^>]*>'
+        for m in re.finditer(pattern, html_text):
+            text = _to_text(_scan_div(html_text, m.end()))
+            if len(text) > len(best):
+                best = text
+    return best
+
+
+# ── Classification gate ────────────────────────────────────────────────────────
+
+# Title shapes that only ever appear on the AI-written platform-news roundups
+# ("This Week in Ad Platforms: Snapchat Opens to AI Agents…"). ~13-25% of recent
+# coachs-corner. These are not dropped — they are stored as `article_news` so search
+# can down-weight them, because a few carry real operator relevance
+# (e.g. "Google's July 2026 Demand Gen Drop: Checkout Links, tROAS Upgrades").
+_NEWS_MARKERS = (
+    "this week in ad platforms",
+    "what ecommerce brands need to know",
+    "new terms of service",
+    "is live:",
+    " announces ",
+    " launches ",
+    " opens to ",
+    " rolls out ",
+    "summit recap",
+    "what the ",
+)
+
+
+def classify_article(title: str, body: str, template: str) -> str:
+    """'shownotes' | 'article_news' | 'substantive'.
+
+    Runs BEFORE extraction, mirroring `newsletter_ingestor.is_promo_only()`. A
+    zero-insight extraction result is not an acceptable substitute: it costs a full
+    multi-chunk Claude pass per item and cannot distinguish "thin" from "extraction
+    failed", so the two get conflated in coverage metrics — the exact silent failure
+    the newsletter layer spent three months in.
+    """
+    if template == "podcast" or len(body) < MIN_ARTICLE_CHARS:
+        return "shownotes"
+
+    blob = f"{title}\n{body[:2000]}".lower()
+    if not any(marker in blob for marker in _NEWS_MARKERS):
+        return "substantive"
+
+    # A marker fired — ask the model, because these titles overlap with genuinely
+    # useful platform-change explainers. Fail OPEN to substantive: mislabelling a
+    # real article as news costs it search rank, which is worse than the reverse.
+    try:
+        from insight_extractor import _anthropic_message
+
+        system = "You classify ecommerce industry content. Answer with exactly one word."
+        user = (
+            "Is this article a NEWS roundup — reporting what a platform announced, "
+            "recapping an event, or summarising this week's updates — or is it an "
+            "EVERGREEN operator piece: a framework, unit-economics teardown, case "
+            "study, or point of view that stays useful months from now?\n\n"
+            "Answer NEWS or EVERGREEN.\n\n"
+            "An article that explains what a platform change MEANS for how operators "
+            "should act is EVERGREEN. Pure 'here is what was announced' is NEWS.\n\n"
+            f"TITLE: {title}\n\nBODY:\n{body[:4000]}"
+        )
+        verdict = (_anthropic_message(system, user) or "").strip().upper()
+    except Exception:
+        return "substantive"
+    return "article_news" if verdict.startswith("NEWS") else "substantive"
+
+
+# ── Single-article pipeline ────────────────────────────────────────────────────
+
+def parse_article(url: str, html_text: str, published_at: str | None = None) -> dict:
+    """HTML -> the row shape `/ingest-article` and the backfill both store."""
+    template = detect_template(html_text)
+    title = extract_title(html_text)
+    body = extract_body(html_text)
+    kind = classify_article(title, body, template)
+    return {
+        "url": url,
+        "title": title,
+        "body_text": body,
+        "template": template,
+        "kind": kind,
+        "chars": len(body),
+        "published_at": published_at,
+        "medium": MEDIUM_ARTICLE_NEWS if kind == "article_news" else MEDIUM_ARTICLE,
+        "source": SOURCE_SLUG,
+        "author": SOURCE_AUTHOR,
+    }
+
+
+def source_from_url(url: str) -> str | None:
+    """Derive the source slug from the URL host — never from a caller-supplied field.
+
+    Caller-supplied attribution is what filed every newsletter from 2026-05-09 on as
+    `nik_sharma` (CLAUDE.md defect #2). Same rule applies here from day one.
+    """
+    m = re.match(r"https?://(?:www\.)?([^/]+)/", url)
+    if not m:
+        return None
+    return SOURCE_SLUG if m.group(1).lower() == SITE_HOST else None
+
+
+def fetch_and_parse(url: str, published_at: str | None = None) -> dict:
+    return parse_article(url, fetch(url), published_at)
+
+
+# ── Sync path (atom feeds) ─────────────────────────────────────────────────────
+
+def fetch_recent(blog: str) -> list[dict]:
+    """Newest entries for one blog, with full body straight from the atom feed.
+
+    The feed's `<content type="html">` is the complete article, so the daily sync
+    never needs to fetch the page itself. 30 entries max, pagination ignored.
+    """
+    import html as _html
+
+    xml = fetch(f"https://{SITE_HOST}/blogs/{blog}.atom", timeout=45)
+    out = []
+    for entry in re.findall(r"<entry>(.*?)</entry>", xml, re.S):
+        link = re.search(r'<link[^>]*href="([^"]+)"', entry)
+        pub = re.search(r"<published>([^<]+)</published>", entry)
+        title = re.search(r"<title>(.*?)</title>", entry, re.S)
+        content = re.search(r"<content[^>]*>(.*?)</content>", entry, re.S)
+        if not (link and content):
+            continue
+        raw = content.group(1)
+        cdata = re.search(r"<!\[CDATA\[(.*?)\]\]>", raw, re.S)
+        body_html = cdata.group(1) if cdata else _html.unescape(raw)
+        body = _to_text(body_html)
+        name = _html.unescape(title.group(1)).strip() if title else ""
+        kind = classify_article(name, body, "article")
+        out.append({
+            "url": link.group(1).strip(),
+            "title": name,
+            "body_text": body,
+            "template": "article",
+            "kind": kind,
+            "chars": len(body),
+            "published_at": pub.group(1).strip() if pub else None,
+            "medium": MEDIUM_ARTICLE_NEWS if kind == "article_news" else MEDIUM_ARTICLE,
+            "source": SOURCE_SLUG,
+            "author": SOURCE_AUTHOR,
+            "blog": blog,
+        })
+    return out
+
+
+# ── Storage ────────────────────────────────────────────────────────────────────
+
+def upsert_article(row: dict) -> tuple[str, bool]:
+    """Insert/refresh one article. Returns (newsletter_id, needs_extraction).
+
+    `newsletters.email_id` is UNIQUE, so the canonical URL goes there and carries
+    idempotency for free — re-running the backfill cannot duplicate a row.
+    """
+    import uuid
+
+    from newsletter_ingestor import _db_conn
+
+    conn = _db_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, processed, length(body_text) FROM newsletters WHERE email_id = %s",
+                (row["url"],),
+            )
+            existing = cur.fetchone()
+            if existing:
+                nl_id, processed, body_len = str(existing[0]), existing[1], (existing[2] or 0)
+                # Only rewrite when the article genuinely grew (CTC edits posts).
+                if len(row["body_text"]) > body_len * 1.5 and len(row["body_text"]) > 500:
+                    cur.execute(
+                        "UPDATE newsletters SET body_text = %s, processed = FALSE, medium = %s "
+                        "WHERE id = %s",
+                        (row["body_text"], row["medium"], nl_id),
+                    )
+                    conn.commit()
+                    return nl_id, True
+                return nl_id, not processed
+
+            nl_id = str(uuid.uuid4())
+            cur.execute(
+                """
+                INSERT INTO newsletters
+                    (id, email_id, source, author, subject, published_at, body_text,
+                     processed, medium, url)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE, %s, %s)
+                ON CONFLICT (email_id) DO NOTHING
+                """,
+                (
+                    nl_id, row["url"], row["source"], row["author"], row["title"],
+                    row.get("published_at"), row["body_text"], row["medium"], row["url"],
+                ),
+            )
+            conn.commit()
+            return nl_id, True
+    finally:
+        conn.close()
+
+
+def ingest_article(url: str, row: dict | None = None) -> dict:
+    """Full path for one article: fetch -> classify -> store -> extract.
+
+    Show notes are never stored. Everything else lands and is extracted with the same
+    chunker and prompt the newsletters use.
+    """
+    from newsletter_ingestor import (
+        chunk_text, extract_newsletter_insights, store_newsletter_insights,
+    )
+
+    if row is None:
+        row = fetch_and_parse(url)
+
+    if row["kind"] == "shownotes":
+        return {"url": url, "status": "skipped_shownotes", "chars": row["chars"],
+                "insights_count": 0}
+    if not row["body_text"] or row["chars"] < MIN_ARTICLE_CHARS:
+        return {"url": url, "status": "skipped_short", "chars": row["chars"],
+                "insights_count": 0}
+
+    nl_id, needs_extraction = upsert_article(row)
+    if not needs_extraction:
+        return {"url": url, "newsletter_id": nl_id, "status": "duplicate",
+                "insights_count": 0}
+
+    all_insights: list[dict] = []
+    for chunk in chunk_text(row["body_text"]):
+        chunk_insights = extract_newsletter_insights(chunk)
+        for ins in chunk_insights:
+            ins["source_chunk"] = chunk[:500]
+        all_insights.extend(chunk_insights)
+
+    count = store_newsletter_insights(nl_id, row["source"], all_insights)
+    return {
+        "url": url,
+        "newsletter_id": nl_id,
+        "status": "processed",
+        "kind": row["kind"],
+        "medium": row["medium"],
+        "chars": row["chars"],
+        "insights_count": count,
+    }
+
+
+def utcnow() -> str:
+    return datetime.now(timezone.utc).isoformat()
