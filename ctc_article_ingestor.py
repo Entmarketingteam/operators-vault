@@ -500,7 +500,7 @@ def ingest_article(url: str, row: dict | None = None) -> dict:
 
     all_insights: list[dict] = []
     for chunk in chunk_text(row["body_text"]):
-        chunk_insights = extract_newsletter_insights(chunk)
+        chunk_insights = extract_article_insights(chunk, row.get("title", ""))
         for ins in chunk_insights:
             ins["source_chunk"] = chunk[:500]
         all_insights.extend(chunk_insights)
