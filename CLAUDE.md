@@ -151,6 +151,48 @@ Railway restart before the new source is accepted.
 `unclassified` is a reserved slug for issues whose sender could not be resolved —
 they are quarantined there, never guessed and never dropped.
 
+### CTC articles — a second medium under `taylor_holiday` (added 2026-08-03)
+Taylor's *emails* are short sales copy (130 issues, 728 insights, 5.6 per issue vs
+Chase's 18.9). His substance — four-quarter accounting, OPEX floor, unit economics —
+is published as articles on commonthreadco.com. Those now ingest into the SAME
+`newsletters` / `newsletter_insights` tables under the SAME `taylor_holiday` slug,
+separated by the new `newsletters.medium` column:
+
+| medium | meaning |
+|---|---|
+| `email` | from Gmail (every pre-existing row) |
+| `article` | evergreen long-form from commonthreadco.com |
+| `article_news` | AI-written platform-news roundup — stored, but down-weightable |
+
+Module: `ctc_article_ingestor.py`. **Canonical owners — do not build a third path:**
+- **New articles:** `POST /sync-ctc-articles`, called daily by n8n `WEH4lUoSawN0J78f`.
+- **Historical backfill:** `scripts/backfill_ctc_articles.py` (harnessed, ~400 pending).
+
+Facts that cost real time to learn — do not re-derive:
+- **⚠️ CTC rate-limits far harder than it looks.** Ten feed requests back to back
+  return 429 for minutes *per IP* — it took out this Mac and then Railway, an IP that
+  had been fetching fine seconds earlier. Escalates from 429 to refusing connections
+  outright, and sends no `Retry-After`. Hence `_CTC_FEED_PACE_SEC=15` between feeds
+  and the serial 20s pacing in the backfill. **Never parallelise CTC fetching.**
+- **The `.atom` feed is the sync path; the sitemap is the backfill path.** Feeds carry
+  the full article HTML in `<content>` (no scraping needed) but cap at 30 entries and
+  **silently ignore pagination** — `?page=1`, `?page=2` and `?page=8` return
+  byte-identical responses.
+- **Generic extractors do not work.** `defuddle` returned 892 bytes of nav chrome and
+  zero body, and there is no JSON-LD on any page. Two hand-written selectors
+  (`bc-content` for articles, `description` for podcast pages) resolved 99/99 sampled.
+- **Half the blog corpus is the CTC podcast** (`ecommerce-playbook`, `dtc-hotline`,
+  307+ URLs at ~1,100 chars of show notes). Excluded by template detection, so it
+  never costs a fetch or an extraction pass.
+- **Articles must not use the raw newsletter prompt.** It opens by naming five
+  newsletter authors and asks for "quotes from the author"; an article carries no From
+  header, so unframed extraction invented attributions — real output included
+  "(Operators Newsletter author)" and "Newsletter author, on nearshoring to Mexico".
+  `extract_article_insights()` states the provenance in-content and fixes it. The
+  background worker routes on `medium`, so the startup re-queue path is covered too.
+- **Yield is high:** one 20,570-char article produced 105 insights — more than 14% of
+  Taylor's entire email corpus, from a single page.
+
 **Not subscribed** (verified absent from the mailbox 2026-08-01, searched all folders
 including spam/trash): Cody Plofker, Andrew Faris / AJF Growth. Adding them needs a
 subscribe from marketingteam@nickient.com, not a code change.
