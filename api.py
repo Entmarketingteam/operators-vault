@@ -3777,7 +3777,8 @@ def get_newsletter(newsletter_id: str):
         try:
             cur.execute(
                 """
-                SELECT id, email_id, source, author, subject, published_at, processed, body_text
+                SELECT id, email_id, source, author, subject, published_at, processed, body_text,
+                       COALESCE(medium, 'email') AS medium, url
                 FROM newsletters WHERE id = %s
                 """,
                 (newsletter_id,),
