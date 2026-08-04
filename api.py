@@ -3506,9 +3506,18 @@ def _run_ctc_sync(blogs: str = "", dry_run: bool = False):
     wanted = [b.strip() for b in blogs.split(",") if b.strip()] or list(_CTC_SYNC_BLOGS)
     summary = {"blogs": {}, "queued": 0, "duplicates": 0, "skipped": 0, "errors": 0}
 
+    # Fetch unclassified and drop already-stored URLs FIRST. Classification can cost
+    # an LLM call per entry, and the feeds return the same ~30 posts every day, so
+    # classifying before the dedupe check burnt ~300 calls a day to learn nothing.
+    try:
+        known = ctc.existing_article_urls()
+    except Exception as e:
+        _log.warning("ctc_sync_known_urls_failed", extra={"error": str(e)})
+        known = set()
+
     for blog in wanted:
         try:
-            entries = ctc.fetch_recent(blog)
+            entries = ctc.fetch_recent(blog, classify=False)
         except Exception as e:
             summary["blogs"][blog] = {"error": str(e)[:120]}
             summary["errors"] += 1
@@ -3517,6 +3526,12 @@ def _run_ctc_sync(blogs: str = "", dry_run: bool = False):
 
         stats = {"seen": len(entries), "queued": 0, "duplicates": 0, "skipped": 0}
         for row in entries:
+            if row["url"] in known:
+                stats["duplicates"] += 1
+                continue
+            row["kind"] = ctc.classify_article(row["title"], row["body_text"], "article")
+            row["medium"] = (ctc.MEDIUM_ARTICLE_NEWS if row["kind"] == "article_news"
+                             else ctc.MEDIUM_ARTICLE)
             if row["kind"] in ("shownotes", "thin", "extraction_failed"):
                 stats["skipped"] += 1
                 continue
