@@ -58,6 +58,28 @@ Four independent defects, all verified against the live DB and the Gmail API:
    Fixed by `20260801_newsletter_insights_fts.sql` + rank normalization + a source
    quota in guide/chat context.
 
+## ⚠️ The startup migration runner silently skipped the first statement of 3 of 5 files
+`_run_startup_migration` split each file on `;` and skipped any fragment whose text
+began with `--`. A file that opens with a comment header puts that comment and its
+first statement in the SAME fragment, so **the first statement of every
+comment-led migration never ran, on every boot.** Fixed 2026-08-03 by stripping
+comment lines before the emptiness test.
+
+Damage found: `channel_configs` **had never been created** (so `/channels` had been
+quietly serving its hardcoded fallback), and `migrate_newsletter_retry.sql` had never
+applied — which is **the actual root cause of defect #1 below**. The `retry_count`
+column the extraction worker selected was not "a column no migration ever created";
+the migration existed and was skipped at boot, silently, every time. All six files
+now apply cleanly (verified in a real boot log).
+
+Two rules follow, and both are load-bearing:
+- **A migration file in `sql/` must contain no semicolon inside any comment** — the
+  splitter is still naive, and the fragment after such a semicolon gets executed as
+  SQL. This cost three failed attempts while adding `add_newsletter_medium.sql`.
+- **`sql/` is the self-applying path** (registered in the `_run_startup_migration`
+  tuple). `supabase/migrations/*.sql` is the historical record and needs manual
+  application. Put anything that must survive a fresh boot in `sql/`.
+
 ## ⚠️ Duplicate `/topic-guide` route (pre-existing, not yet resolved)
 `api.py` defines `@app.post("/topic-guide")` **twice** (~line 2441 and ~line 3652).
 FastAPI matches in registration order, so **the earlier one serves and the later
