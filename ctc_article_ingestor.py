@@ -424,7 +424,10 @@ def fetch_recent(blog: str, classify: bool = True) -> list[dict]:
         body_html = cdata.group(1) if cdata else _html.unescape(raw)
         body = _to_text(body_html)
         name = _html.unescape(title.group(1)).strip() if title else ""
-        kind = classify_article(name, body, "article")
+        # Classification can cost an LLM call, so callers that are about to discard
+        # already-stored URLs pass classify=False and classify only what is new. At
+        # steady state that is ~1 call a day instead of ~30 per blog.
+        kind = classify_article(name, body, "article") if classify else None
         out.append({
             "url": link.group(1).strip(),
             "title": name,
