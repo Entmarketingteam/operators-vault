@@ -3548,6 +3548,7 @@ def _run_ctc_sync(blogs: str = "", dry_run: bool = False):
 
     import time as _time
 
+    consecutive_429 = 0
     for idx, blog in enumerate(wanted):
         # ⚠️ Pace between feeds. CTC's limiter is tighter than it looks: ten feed
         # requests back to back trip a 429 that then applies to the whole IP for
