@@ -210,7 +210,13 @@ sits above the substance.
 |----|------|----------|--------|
 | `FPWjPuFq2jkPkJmj` | Newsletter Daily Sync | Every 24h (`newer_than:2d`) | ACTIVE |
 | `n2dv5cUA5ZaF3TPK` | YouTube Auto-Ingest | Daily 2am cron | ACTIVE |
+| `WEH4lUoSawN0J78f` | CTC Article Sync | Every 24h | ACTIVE |
 | `sbhJSZEELdkQZVnG` | Historical Backfill | Manual only | INACTIVE |
+
+**CTC Article Sync is deliberately two nodes — a schedule trigger and one HTTP POST to
+`/sync-ctc-articles`, with no Code node.** The entire per-item loop lives server-side
+precisely so the `$json`-vs-`$input.all()` bug that discarded all but one email per run
+(defect #4 below) has nowhere to recur. Do not "improve" it by moving logic into n8n.
 
 **YouTube Auto-Ingest flow:** RSS feeds → diff against `/episodes` → POST `/process-one/async` for new videos → Slack summary to #ecas-ops
 
