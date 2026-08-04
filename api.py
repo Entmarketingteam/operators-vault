@@ -3515,7 +3515,17 @@ def _run_ctc_sync(blogs: str = "", dry_run: bool = False):
         _log.warning("ctc_sync_known_urls_failed", extra={"error": str(e)})
         known = set()
 
-    for blog in wanted:
+    import time as _time
+
+    for idx, blog in enumerate(wanted):
+        # ⚠️ Pace between feeds. CTC's limiter is tighter than it looks: ten feed
+        # requests back to back trip a 429 that then applies to the whole IP for
+        # minutes. Measured 2026-08-03 — a 10-blog run from Railway (an IP that had
+        # been fetching fine seconds earlier) came back 429 on every subsequent blog
+        # and stored nothing. The run is backgrounded, so this costs nothing anyone
+        # is waiting on.
+        if idx:
+            _time.sleep(_CTC_FEED_PACE_SEC)
         try:
             entries = ctc.fetch_recent(blog, classify=False)
         except Exception as e:
