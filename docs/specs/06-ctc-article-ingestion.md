@@ -1,7 +1,23 @@
 # Spec 06 — CTC long-form article ingestion (`taylor_holiday` depth fix)
 
-Status: **SCOPED, not built.** Probed 2026-08-02 against the live site and the live DB.
-Owner-to-be: `ctc_article_ingestor.py` + one n8n daily sync + one backfill job.
+Status: **BUILT AND DEPLOYED 2026-08-03.** Backfill of the ~400-article history is
+queued but not yet run. Probed 2026-08-02 against the live site and the live DB.
+
+Decisions taken (Ethan: "do what you think is best"):
+1. **Same slug.** Articles merge into `taylor_holiday`, separated by `newsletters.medium`.
+2. **Podcast show notes excluded** — 307+ URLs at ~1,100 chars, dropped by template
+   detection so they never cost a fetch or an extraction pass.
+3. **News roundups tagged, not dropped** — stored as `medium='article_news'` so search
+   can down-weight them while keeping the useful platform-change explainers.
+
+Shipped:
+- `ctc_article_ingestor.py` — enumeration, two-selector extraction, classification gate
+- `sql/add_newsletter_medium.sql` — `medium` + `url` columns (applied, self-applying)
+- `POST /sync-ctc-articles` — server-side atom walk, backgrounded, paced
+- `scripts/backfill_ctc_articles.py` — harnessed historical backfill (self-check 10/10)
+- n8n `WEH4lUoSawN0J78f` — daily trigger, two nodes, no Code node
+- **Bonus fix:** the startup migration runner, which had been silently skipping the
+  first statement of three of five migration files. See CLAUDE.md.
 
 ## Why
 
