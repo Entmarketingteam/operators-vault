@@ -3624,7 +3624,7 @@ def _run_ctc_sync(blogs: str = "", dry_run: bool = False):
 
 
 @app.get("/newsletter-health")
-def newsletter_health(stale_days: int = 10):
+def newsletter_health(stale_days: int = 10, article_stale_days: int = 14):
     """Report per-source freshness and extraction health.
 
     This exists because the newsletter layer failed silently for three months and
