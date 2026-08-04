@@ -3559,6 +3559,20 @@ def _run_ctc_sync(blogs: str = "", dry_run: bool = False):
             _time.sleep(_CTC_FEED_PACE_SEC)
         try:
             entries = ctc.fetch_recent(blog, classify=False)
+            consecutive_429 = 0
+        except ctc.RateLimited as e:
+            consecutive_429 += 1
+            summary["blogs"][blog] = {"error": str(e)[:120]}
+            summary["errors"] += 1
+            _log.warning("ctc_sync_rate_limited",
+                         extra={"blog": blog, "consecutive": consecutive_429})
+            if consecutive_429 >= _CTC_RATE_LIMIT_GIVE_UP:
+                summary["rate_limited"] = True
+                summary["abandoned_after"] = blog
+                _log.warning("ctc_sync_abandoned_rate_limited",
+                             extra={"after_blog": blog, "remaining": wanted[idx + 1:]})
+                break
+            continue
         except Exception as e:
             summary["blogs"][blog] = {"error": str(e)[:120]}
             summary["errors"] += 1
