@@ -174,7 +174,7 @@ counts before and after. `marginal CAC payback` currently returns 1 newsletter /
    19,168. **Worth watching during backfill:** if it crowds other sources out of
    Discover, the lever is the guide/chat source quota, not re-extraction.
 
-## Decisions needed from Ethan
+## Decisions (resolved 2026-08-03 — kept for the reasoning)
 
 1. **Same slug or separate?** `taylor_holiday` for both email + articles (recommended —
    they merge everywhere), or a distinct `ctc_articles` source so the two can be filtered

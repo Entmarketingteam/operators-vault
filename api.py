@@ -1169,7 +1169,15 @@ def _search_postgres(
                     f"""
                     SELECT ni.id, ni.source, ni.category, ni.title, ni.description,
                            n.subject, n.author, n.published_at,
-                           ts_rank(ni.fts, websearch_to_tsquery('english', %s)) AS rank,
+                           -- Platform-news roundups ("This Week in Ad Platforms…") are
+                           -- kept but down-weighted: they are ~13-25% of recent CTC
+                           -- output, they go stale in weeks, and at full weight they
+                           -- would crowd the evergreen unit-economics material this
+                           -- source was added for. 0.4 demotes without burying — a
+                           -- strong news hit can still beat a weak evergreen one.
+                           ts_rank(ni.fts, websearch_to_tsquery('english', %s))
+                               * CASE WHEN n.medium = 'article_news' THEN 0.4
+                                      ELSE 1.0 END AS rank,
                            ni.newsletter_id::text
                     FROM newsletter_insights ni
                     JOIN newsletters n ON n.id = ni.newsletter_id
