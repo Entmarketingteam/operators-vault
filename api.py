@@ -3795,6 +3795,11 @@ def get_newsletter(newsletter_id: str):
                 "published_at": row[5].isoformat() if row[5] else None,
                 "processed": row[6],
                 "body_text": row[7] or "",
+                # 'email' | 'article' | 'article_news'. `url` is set for articles only,
+                # so the modal can link out to commonthreadco.com instead of rendering
+                # a Gmail-shaped citation for something that was never an email.
+                "medium": row[8],
+                "url": row[9],
             }
             # All insights from this newsletter
             cur.execute(
