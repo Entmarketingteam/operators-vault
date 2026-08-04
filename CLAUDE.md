@@ -169,11 +169,15 @@ Module: `ctc_article_ingestor.py`. **Canonical owners — do not build a third p
 - **Historical backfill:** `scripts/backfill_ctc_articles.py` (harnessed, ~400 pending).
 
 Facts that cost real time to learn — do not re-derive:
-- **⚠️ CTC rate-limits far harder than it looks.** Ten feed requests back to back
-  return 429 for minutes *per IP* — it took out this Mac and then Railway, an IP that
-  had been fetching fine seconds earlier. Escalates from 429 to refusing connections
-  outright, and sends no `Retry-After`. Hence `_CTC_FEED_PACE_SEC=15` between feeds
-  and the serial 20s pacing in the backfill. **Never parallelise CTC fetching.**
+- **⚠️ CTC rate-limits far harder than it looks, and the penalty is long.** Ten feed
+  requests back to back earn a 429 that then applies to the whole IP for **over half an
+  hour** — measured 2026-08-03 on this Mac and then on Railway, an IP that had been
+  fetching cleanly seconds earlier. It escalates from 429 to refusing connections
+  outright and sends no `Retry-After`. Hence `_CTC_FEED_PACE_SEC=60` (a 10-minute
+  background walk, once a day) and serial 20s pacing in the backfill. The sync
+  abandons the walk after 2 consecutive 429s rather than burning 20 minutes
+  rediscovering the same block. **Never parallelise CTC fetching, and do not lower the
+  pacing** — going too fast costs the whole day's sync, not just a slow one.
 - **The `.atom` feed is the sync path; the sitemap is the backfill path.** Feeds carry
   the full article HTML in `<content>` (no scraping needed) but cap at 30 entries and
   **silently ignore pagination** — `?page=1`, `?page=2` and `?page=8` return
