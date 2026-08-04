@@ -3463,6 +3463,9 @@ _CTC_SYNC_BLOGS = (
     "taylor-reacts", "research",
 )
 
+# Seconds between feed requests. See the pacing note in _run_ctc_sync.
+_CTC_FEED_PACE_SEC = int(os.environ.get("CTC_FEED_PACE_SEC", "15"))
+
 
 @app.post("/sync-ctc-articles")
 def sync_ctc_articles(blogs: str = "", dry_run: bool = False, wait: bool = False):
