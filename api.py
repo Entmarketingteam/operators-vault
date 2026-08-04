@@ -3491,9 +3491,17 @@ def sync_ctc_articles(blogs: str = "", dry_run: bool = False, wait: bool = False
 
     import threading
 
-    threading.Thread(
-        target=_run_ctc_sync, kwargs={"blogs": blogs, "dry_run": dry_run}, daemon=True
-    ).start()
+    def _guarded():
+        # An exception in a bare daemon thread goes to stderr and nowhere else — the
+        # caller already got its 200, so a crashed sync would look exactly like a
+        # successful one. Log it where /newsletter-health's readers will find it.
+        try:
+            _run_ctc_sync(blogs=blogs, dry_run=dry_run)
+        except Exception as e:  # noqa: BLE001
+            _log.error("ctc_sync_thread_crashed",
+                       extra={"error": f"{type(e).__name__}: {e}"[:300]})
+
+    threading.Thread(target=_guarded, daemon=True).start()
     return {"status": "started", "dry_run": dry_run,
             "blogs": [b.strip() for b in blogs.split(",") if b.strip()] or list(_CTC_SYNC_BLOGS)}
 

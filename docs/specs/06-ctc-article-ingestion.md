@@ -116,10 +116,12 @@ two-wrapper body extraction, `classify_article()`. Proof: run against 30 held-ou
 (not the 99 already sampled — L4, judge brings its own fixtures) and paste the
 template/length/classification table; ≥95% must extract non-empty on the article template.
 
-**Slice 2 — migration + write path.** `medium` + `url` columns, `POST /ingest-article`
-deriving source server-side from the URL host (never caller-supplied — defect #2 in
-CLAUDE.md). Proof: ingest 5 articles, paste `select` showing 5 rows with correct
-`medium='article'`, then re-run the same 5 and paste a row count still at 5.
+**Slice 2 — migration + write path.** ✅ Shipped as `POST /sync-ctc-articles` rather
+than the per-article `POST /ingest-article` originally sketched: putting the whole walk
+server-side means n8n needs no Code node at all, which is what makes the defect-#4 bug
+class structurally impossible rather than merely avoided. Source is still derived from
+the URL host, never caller-supplied. Proven: article stored with `medium='article'` and
+its URL, re-run returned `duplicate` with zero double-write.
 
 **Slice 3 — backfill, harnessed.** `scripts/backfill_ctc_articles.py` on the
 `job_runs`/`job_checkpoints` harness (`20260730_job_harness.sql`), dry-run default,
@@ -127,7 +129,11 @@ CLAUDE.md). Proof: ingest 5 articles, paste `select` showing 5 rows with correct
 `HARNESS SELF-CHECK v1` 10/10, a kill-mid-run → resume-from-item-k+1 transcript, and a
 second full run showing zero new rows.
 
-**Slice 4 — daily sync.** n8n workflow polling the 8 substantive blogs' `.atom` feeds,
+**Slice 4 — daily sync.** ✅ Shipped as n8n `WEH4lUoSawN0J78f` — schedule trigger +
+one HTTP POST, no Code node, GET-verified active. Original sketch below kept because its
+warning still applies to anyone tempted to move logic back into n8n:
+
+~~n8n workflow polling the 8 substantive blogs' `.atom` feeds,
 diffing against `/newsletters` by URL, POSTing new ones. **The Code node MUST iterate
 `$input.all()` and return one item per entry** — this is the exact bug that cost 68% of
 newsletter ingestion (CLAUDE.md defect #4). Proof: one execution log showing N entries
