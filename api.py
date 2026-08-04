@@ -3472,7 +3472,19 @@ _CTC_SYNC_BLOGS = (
 )
 
 # Seconds between feed requests. See the pacing note in _run_ctc_sync.
-_CTC_FEED_PACE_SEC = int(os.environ.get("CTC_FEED_PACE_SEC", "15"))
+#
+# 60, not 15. A 10-blog run at 15s pacing still tripped CTC's limiter, and the
+# resulting penalty lasted over half an hour rather than the "few minutes" the first
+# 429s suggested. This walk runs once a day in the background, so a 10-minute stroll
+# costs nothing anyone is waiting on — and the failure mode of going too fast is
+# losing the whole day's sync, not merely a slow one.
+_CTC_FEED_PACE_SEC = int(os.environ.get("CTC_FEED_PACE_SEC", "60"))
+
+# Consecutive rate-limited feeds before abandoning the walk. Once CTC is refusing this
+# IP, every remaining blog fails identically after a full ~2min backoff ladder, so
+# continuing burns 20 minutes to learn one fact and adds load to a host already
+# telling us to stop.
+_CTC_RATE_LIMIT_GIVE_UP = 2
 
 
 @app.post("/sync-ctc-articles")
