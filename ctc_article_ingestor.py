@@ -386,7 +386,23 @@ def fetch_and_parse(url: str, published_at: str | None = None) -> dict:
 
 # ── Sync path (atom feeds) ─────────────────────────────────────────────────────
 
-def fetch_recent(blog: str) -> list[dict]:
+def existing_article_urls() -> set[str]:
+    """URLs already stored for this source. `email_id` holds the canonical URL."""
+    from newsletter_ingestor import _db_conn
+
+    conn = _db_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT email_id FROM newsletters WHERE source = %s AND medium <> 'email'",
+                (SOURCE_SLUG,),
+            )
+            return {r[0] for r in cur.fetchall() if r[0]}
+    finally:
+        conn.close()
+
+
+def fetch_recent(blog: str, classify: bool = True) -> list[dict]:
     """Newest entries for one blog, with full body straight from the atom feed.
 
     The feed's `<content type="html">` is the complete article, so the daily sync
