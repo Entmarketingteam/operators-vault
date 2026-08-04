@@ -3686,6 +3686,46 @@ def newsletter_health(stale_days: int = 10):
                 "stale": stale,
                 "extraction_dead": dead_extraction,
             })
+        # CTC articles need their own row. They share the `taylor_holiday` slug, so a
+        # dead article sync is invisible above: his emails keep arriving and the source
+        # reads healthy while the far richer article side has silently stopped. That is
+        # precisely how the newsletter layer hid for three months — one signal masking
+        # another. `article_stale_days` is generous because the small blogs (bridges,
+        # research) legitimately go quiet for weeks; coachs-corner alone publishes
+        # often enough to keep this fresh whenever the sync is working.
+        cur.execute(
+            """
+            SELECT max(n.published_at),
+                   count(DISTINCT n.id) FILTER (
+                       WHERE n.published_at > now() - interval '30 days'),
+                   count(ni.id) FILTER (
+                       WHERE n.published_at > now() - interval '30 days')
+            FROM newsletters n
+            LEFT JOIN newsletter_insights ni ON ni.newsletter_id = n.id
+            WHERE n.medium <> 'email'
+            """
+        )
+        a_latest, a_docs_30d, a_insights_30d = cur.fetchone()
+        a_days = (datetime.now(timezone.utc) - a_latest).days if a_latest else None
+        a_stale = a_days is None or a_days > article_stale_days
+        a_dead = bool(a_docs_30d) and not a_insights_30d
+        if a_stale:
+            problems.append(
+                f"ctc_articles: no article in "
+                f"{a_days if a_days is not None else 'ever'} days — sync may be dead")
+        if a_dead:
+            problems.append(
+                f"ctc_articles: {a_docs_30d} articles in 30d but 0 insights extracted")
+        sources.append({
+            "source": "ctc_articles",
+            "latest": a_latest.isoformat() if a_latest else None,
+            "days_since_latest": a_days,
+            "issues_30d": a_docs_30d,
+            "insights_30d": a_insights_30d,
+            "stale": a_stale,
+            "extraction_dead": a_dead,
+        })
+
         return {"ok": not problems, "problems": problems, "sources": sources}
     except Exception as e:
         _log.error("newsletter_health_failed", extra={"error": str(e)})
