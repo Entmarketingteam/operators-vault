@@ -3570,7 +3570,13 @@ def _run_ctc_sync(blogs: str = "", dry_run: bool = False):
             summary[k] += stats[k]
 
     summary["dry_run"] = dry_run
-    _log.info("ctc_sync_done", extra=summary)
+    # A run that touched every feed and stored nothing while reporting HTTP 200 is
+    # this org's dominant silent failure. Log it at error level so it is greppable,
+    # rather than letting a green "ctc_sync_done" imply success.
+    if summary["errors"] and not summary["queued"]:
+        _log.error("ctc_sync_all_failed", extra=summary)
+    else:
+        _log.info("ctc_sync_done", extra=summary)
     return summary
 
 
