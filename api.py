@@ -3740,7 +3740,8 @@ def list_newsletters(
             cur.execute(
                 f"""
                 SELECT id, email_id, source, author, subject, published_at, processed, created_at,
-                       length(body_text) AS body_len
+                       length(body_text) AS body_len,
+                       COALESCE(medium, 'email') AS medium, url
                 FROM newsletters
                 {where_sql}
                 ORDER BY published_at DESC NULLS LAST
