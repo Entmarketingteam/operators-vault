@@ -147,6 +147,33 @@ counts before and after. `marginal CAC payback` currently returns 1 newsletter /
   slice 4 an hour. The risk is not volume — it is repeating a known defect, which is why
   each slice above names the defect it must not reintroduce.
 
+## What the build actually taught us (beyond the scope above)
+
+1. **CTC's rate limiter is the binding constraint, not extraction.** Ten feed requests
+   back to back return 429 for minutes per IP. It took out this Mac during probing and
+   then Railway — an IP that had been fetching cleanly seconds earlier. No
+   `Retry-After` header, and it escalates from 429 to refusing connections. Everything
+   is now serial and paced (15s between feeds, 20s between backfill pages), and 429 is
+   classified as a whole-run stop rather than a per-item fault.
+2. **A length floor is the wrong gate.** The first cut used 1,000 chars to exclude show
+   notes, which would have silently deleted `marginal-frontier` (848 chars) and
+   `can-you-say-dpa` (772) — genuinely short old posts, and `marginal-frontier` is
+   precisely the Taylor material this job exists to capture. Template detection does
+   the real work; the floor is now 400 and only catches extraction failure, which is
+   *quarantined and surfaced*, never silently skipped.
+3. **The newsletter prompt mis-attributes articles.** Unframed, it produced quote
+   titles reading "(Operators Newsletter author)" and "Newsletter author, on
+   nearshoring to Mexico". After framing, all quotes attribute to Taylor Holiday —
+   which also means his speaker page (FTS on speaker name) now surfaces them.
+4. **Classify after the dedupe check, not before.** The feeds return the same ~30 posts
+   daily and classification can cost an LLM call each, so the original ordering burned
+   ~300 calls a day to learn nothing.
+5. **Yield is much higher than projected.** One 20,570-char article produced 105
+   insights. At that rate ~400 articles could produce 15-25k insights, which would make
+   `taylor_holiday` the largest source in the vault — bigger than Chase Dimond's
+   19,168. **Worth watching during backfill:** if it crowds other sources out of
+   Discover, the lever is the guide/chat source quota, not re-extraction.
+
 ## Decisions needed from Ethan
 
 1. **Same slug or separate?** `taylor_holiday` for both email + articles (recommended —
