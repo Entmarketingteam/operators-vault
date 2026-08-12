@@ -1175,7 +1175,7 @@ def _search_postgres(
                            -- would crowd the evergreen unit-economics material this
                            -- source was added for. 0.4 demotes without burying — a
                            -- strong news hit can still beat a weak evergreen one.
-                           ts_rank(ni.fts, websearch_to_tsquery('english', %s))
+                           ts_rank(ni.fts, websearch_to_tsquery('english_unaccent', %s))
                                * CASE WHEN n.medium = 'article_news' THEN 0.4
                                       ELSE 1.0 END AS rank,
                            ni.newsletter_id::text
