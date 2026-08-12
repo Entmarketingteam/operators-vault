@@ -86,6 +86,7 @@ def _run_startup_migration() -> None:
         "migrate_newsletter_retry.sql",
         "add_topic_guides.sql",
         "add_newsletter_medium.sql",
+        "20260812_pgvector_embeddings.sql",
     ):
         migration_path = _root / "sql" / migration_name
         if not migration_path.exists():
