@@ -1086,8 +1086,8 @@ def _search_postgres(
             cur.execute(
                 f"""
                 SELECT id, video_id, podcast, start_time_sec, end_time_sec, text, speaker_label,
-                       ts_rank(fts, websearch_to_tsquery('english', %s)) AS rank,
-                       ts_headline('english', text, websearch_to_tsquery('english', %s),
+                       ts_rank(fts, websearch_to_tsquery('english_unaccent', %s)) AS rank,
+                       ts_headline('english', text, websearch_to_tsquery('english_unaccent', %s),
                            'MaxFragments=1,MaxWords=25,MinWords=10') AS headline
                 FROM segments
                 WHERE {" AND ".join(seg_where)}
