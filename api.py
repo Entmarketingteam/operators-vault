@@ -1156,7 +1156,7 @@ def _search_postgres(
                 # 20260801_newsletter_insights_fts.sql). Before it existed this ranked an
                 # inline UNWEIGHTED to_tsvector against the video side's weighted one, and
                 # newsletters lost essentially every slot in the merge sort below.
-                nl_where = ["ni.fts @@ websearch_to_tsquery('english', %s)"]
+                nl_where = ["ni.fts @@ websearch_to_tsquery('english_unaccent', %s)"]
                 nl_params: list = [q_clean, q_clean]
                 if podcast:
                     nl_where.append("ni.source = %s")
