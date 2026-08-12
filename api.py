@@ -1074,7 +1074,7 @@ def _search_postgres(
         try:
             conn = _get_db_conn()
             cur = conn.cursor()
-            seg_where = ["fts @@ websearch_to_tsquery('english', %s)"]
+            seg_where = ["fts @@ websearch_to_tsquery('english_unaccent', %s)"]
             seg_params: list = [q.strip()]
             if podcast:
                 seg_where.append("podcast = %s")
