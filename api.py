@@ -2503,14 +2503,14 @@ def topic_guide(
     # Over-fetch, then quota down. Fetching exactly body.limit would leave nothing to
     # rebalance when one corpus dominates the top of the ranking — which is exactly
     # how guides ended up citing podcast timestamps and nothing else.
-    search_result = _search_postgres(topic, limit=body.limit * 3, type_="all")
+    search_result = _search_postgres(topic, limit=body.limit * 3, type_="all", max_limit=500)
     hits = _apply_source_quota(search_result.get("hits") or [], body.limit)
 
     # If no hits, fallback to OR keyword query
     if not hits:
         kw_query = _extract_keywords(topic)
         if kw_query and kw_query.replace(" OR ", " ").strip() != topic.lower().strip():
-            search_result = _search_postgres(kw_query, limit=body.limit * 3, type_="all")
+            search_result = _search_postgres(kw_query, limit=body.limit * 3, type_="all", max_limit=500)
             hits = _apply_source_quota(search_result.get("hits") or [], body.limit)
 
     if not hits:
