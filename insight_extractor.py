@@ -9,8 +9,11 @@ import re
 from pathlib import Path
 from typing import Any
 
+from structured_logger import get_logger
+
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 DEFAULT_PROMPT_SET = "operators"
+_log = get_logger("insight_extractor")
 
 
 def _load_prompt(name: str, prompt_set: str = DEFAULT_PROMPT_SET) -> str:
