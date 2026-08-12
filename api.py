@@ -2549,7 +2549,11 @@ def topic_guide(
             pod = (h.get("podcast") or "").replace("_", " ").title()
             speaker = h.get("speaker_name") or h.get("speaker") or ""
             start = h.get("start_time_sec")
-            t = h.get("headline_title") or h.get("headline_description") or h.get("headline") or h.get("text") or ""
+            ins_title = h.get("headline_title") or ""
+            ins_desc = h.get("headline_description") or h.get("description") or ""
+            t = f"{ins_title}. {ins_desc}" if ins_desc else ins_title
+            if not t:
+                t = h.get("headline") or h.get("text") or ""
             if not pod:
                 pod = "Operators Podcast"
             label = f"{pod}" + (f" — {speaker}" if speaker else "") + (f" @ {int(start)}s" if start is not None else "")
