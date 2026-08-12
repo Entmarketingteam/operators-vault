@@ -2110,7 +2110,7 @@ def _get_speaker_by_slug(slug: str) -> dict:
                            n.subject, n.author, n.published_at
                     FROM newsletter_insights ni
                     JOIN newsletters n ON n.id = ni.newsletter_id
-                    WHERE ni.fts @@ to_tsquery('english', %s)
+                    WHERE ni.fts @@ to_tsquery('english_unaccent', %s)
                     ORDER BY ni.id
                     LIMIT 50
                     """,
