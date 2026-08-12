@@ -62,21 +62,22 @@ def _anthropic_message(system: str, user: str, model: str = "claude-haiku-4-5-20
     # Fall back to direct Anthropic API
     try:
         import anthropic
-    except ImportError:
-        raise RuntimeError(f"agent server unavailable and anthropic SDK not installed: {proxy_err}")
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError(f"agent server unavailable and ANTHROPIC_API_KEY not set: {proxy_err}")
-    c = anthropic.Anthropic(api_key=api_key)
-    r = c.messages.create(
-        model=model,
-        max_tokens=4096,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    if r.content and len(r.content) > 0 and hasattr(r.content[0], "text"):
-        return r.content[0].text
-    return ""
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise RuntimeError(f"agent server unavailable and ANTHROPIC_API_KEY not set: {proxy_err}")
+        c = anthropic.Anthropic(api_key=api_key)
+        r = c.messages.create(
+            model=model,
+            max_tokens=4096,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        if r.content and len(r.content) > 0 and hasattr(r.content[0], "text"):
+            return r.content[0].text
+        return ""
+    except Exception as e:
+        _log.warning(f"_anthropic_message: direct Anthropic API fallback failed: {e}")
+        return ""
 
 
 def _parse_insight_block(block: str, category: str) -> list[dict[str, str]]:
