@@ -1012,7 +1012,7 @@ def _search_postgres(
             conn = _get_db_conn()
             cur = conn.cursor()
             def _do_search(query_str: str) -> list[dict]:
-                where_clauses = ["fts @@ websearch_to_tsquery('english', %s)"]
+                where_clauses = ["fts @@ websearch_to_tsquery('english_unaccent', %s)"]
                 params: list = [query_str.strip()]
                 if podcast:
                     where_clauses.append("podcast = %s")
