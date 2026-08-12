@@ -134,9 +134,9 @@ function InsightModal({ insight, onClose, session }: { insight: Insight; onClose
   const colorKey = getCategoryColor(insight.category);
   const c = colors[colorKey];
   const isVideo = !!insight.video_id;
-  const startSec = Math.floor(Number(insight.start_time_sec ?? 0));
+  const hasTimestamp = insight.start_time_sec !== null && insight.start_time_sec !== undefined;
   const youtubeUrl = isVideo
-    ? `https://youtube.com/watch?v=${insight.video_id}&t=${startSec}s`
+    ? `https://youtube.com/watch?v=${insight.video_id}` + (hasTimestamp ? `&t=${Math.floor(Number(insight.start_time_sec))}s` : "")
     : undefined;
   const isNewsletter = !insight.podcast && (insight.author || insight.source);
 
