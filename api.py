@@ -2437,6 +2437,12 @@ Use the provided vault excerpts as your primary source. When excerpts are releva
         )
         agent_res.raise_for_status()
         data = agent_res.json()
+        rc = data.get("returncode")
+        if rc not in (0, None):
+            # Proxy returned HTTP 200 but the CLI call it wrapped failed (usage
+            # limit, auth, crash) — must be checked explicitly or the empty/garbage
+            # body gets treated as a valid answer. See insight_extractor._anthropic_message.
+            raise RuntimeError(f"agent server returncode={rc}: {str(data.get('stderr'))[:200]}")
         reply = data.get("text") or data.get("completion") or data.get("content") or ""
         sources = []
         seen_ids = set()
