@@ -2080,7 +2080,7 @@ def _get_speaker_by_slug(slug: str) -> dict:
                     FROM segments s
                     JOIN transcriptions t ON t.id = s.transcription_id
                     JOIN insights i ON i.video_id = t.video_id
-                    WHERE s.fts @@ to_tsquery('english', %s)
+                    WHERE s.fts @@ to_tsquery('english_unaccent', %s)
                     ORDER BY i.id
                     LIMIT 50
                     """,
