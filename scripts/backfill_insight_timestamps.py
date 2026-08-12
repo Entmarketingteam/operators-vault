@@ -217,6 +217,9 @@ def main() -> int:
     cur.execute(sql, params)
     rows = cur.fetchall()
     cur.close()
+    conn.commit()  # release the AccessShareLock this SELECT holds instead of sitting
+                   # idle-in-transaction for the whole run and blocking DDL elsewhere
+    conn.close()
 
     log.info("%s: %d pending row(s) to process (apply=%s, workers=%d, job_id=%s)",
               JOB_NAME, len(rows), args.apply, args.workers, job_id)
