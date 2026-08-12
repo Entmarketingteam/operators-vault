@@ -2050,7 +2050,7 @@ def _get_speaker_by_slug(slug: str) -> dict:
                 """
                 SELECT DISTINCT ON (i.id) i.id, i.video_id, i.podcast, i.category, i.title, i.description, i.start_time_sec
                 FROM insights i
-                WHERE fts @@ to_tsquery('english', %s)
+                WHERE fts @@ to_tsquery('english_unaccent', %s)
                 ORDER BY i.id, i.created_at DESC
                 LIMIT 50
                 """,
