@@ -1027,9 +1027,9 @@ def _search_postgres(
                 cur.execute(
                     f"""
                     SELECT id, video_id, podcast, category, title, description, start_time_sec, end_time_sec,
-                           ts_rank(fts, websearch_to_tsquery('english', %s)) AS rank,
+                           ts_rank(fts, websearch_to_tsquery('english_unaccent', %s)) AS rank,
                            title AS headline_title,
-                           ts_headline('english', description, websearch_to_tsquery('english', %s),
+                           ts_headline('english', description, websearch_to_tsquery('english_unaccent', %s),
                                'MaxFragments=1,MaxWords=20,MinWords=5') AS headline_description,
                            (SELECT EXISTS (SELECT 1 FROM visual_moments vm WHERE vm.video_id = insights.video_id)) as is_multimodal
                     FROM insights
