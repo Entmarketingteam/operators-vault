@@ -249,14 +249,17 @@ def main() -> int:
               JOB_NAME, resolved, unresolved, errors, len(rows), args.apply)
 
     if args.apply:
-        _finish_job(conn, job_id, "succeeded", {
-            "job": JOB_NAME, "job_id": job_id,
-            "state": {"processed": len(rows), "resolved": resolved,
-                      "unresolved": unresolved, "errors": errors},
-            "next_actions": [f"resume with: python scripts/backfill_insight_timestamps.py --apply --job-id {job_id}"],
-        })
+        finish_conn = db_utils.connect()  # conn was closed after the initial SELECT
+        try:
+            _finish_job(finish_conn, job_id, "succeeded", {
+                "job": JOB_NAME, "job_id": job_id,
+                "state": {"processed": len(rows), "resolved": resolved,
+                          "unresolved": unresolved, "errors": errors},
+                "next_actions": [f"resume with: python scripts/backfill_insight_timestamps.py --apply --job-id {job_id}"],
+            })
+        finally:
+            finish_conn.close()
 
-    conn.close()
     return 0 if errors == 0 else 2
 
 
