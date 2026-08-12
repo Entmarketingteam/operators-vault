@@ -231,10 +231,20 @@ def extract_timestamps(transcript: str, insight: str, prompt_set: str = DEFAULT_
         return (None, None)
     user = tpl.replace("{transcript}", transcript).replace("{insight}", insight)
     system = "Output only <start_time>HH:MM:SS</start_time> and <end_time>HH:MM:SS</end_time>. No other text."
-    raw = _anthropic_message(system, user)
-    st = re.search(r"<start_time>([^<]*)</start_time>", raw)
-    et = re.search(r"<end_time>([^<]*)</end_time>", raw)
-    return (_parse_time(st.group(1)) if st else None, _parse_time(et.group(1)) if et else None)
+
+    for attempt in range(2):
+        raw = _anthropic_message(system, user)
+        st = re.search(r"<start_time>([^<]*)</start_time>", raw)
+        et = re.search(r"<end_time>([^<]*)</end_time>", raw)
+        start = _parse_time(st.group(1)) if st else None
+        if start is not None:
+            return (start, _parse_time(et.group(1)) if et else None)
+        if st is None:
+            _log.warning("extract_timestamps: no <start_time> tag in LLM response (attempt %d)", attempt + 1)
+        else:
+            _log.warning("extract_timestamps: unparseable timestamp value: %r (attempt %d)", st.group(1), attempt + 1)
+
+    return (None, None)
 
 
 def make_framework(topic: str, raw_transcript: str, prompt_set: str = DEFAULT_PROMPT_SET) -> str:
