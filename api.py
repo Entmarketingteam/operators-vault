@@ -1234,6 +1234,295 @@ def _search_postgres(
     return {"query": q or "(all)", "total": len(hits), "hits": hits}
 
 
+# ---------------------------------------------------------------------------
+# Hybrid (FTS + vector) search — opt-in via mode="hybrid", additive to the FTS
+# path above. `_search_postgres` above is untouched; this reuses it as a black
+# box for the FTS side and adds a pgvector side, fused with reciprocal rank
+# fusion. Degrades to `_search_postgres` (FTS-only) on any embedding failure.
+# ---------------------------------------------------------------------------
+
+_EMBEDDING_MODEL = "text-embedding-3-small"
+_EMBEDDING_DIMENSIONS = 512  # must match scripts/backfill_embeddings.py
+
+_openai_client = None
+_openai_client_lock = threading.Lock()
+
+
+def _get_openai_client():
+    global _openai_client
+    if _openai_client is None:
+        with _openai_client_lock:
+            if _openai_client is None:
+                from openai import OpenAI
+                _openai_client = OpenAI()
+    return _openai_client
+
+
+def _embed_query(q: str) -> list[float] | None:
+    """Embed a search query for vector retrieval. Never raises — returns None on any
+    failure (network error, timeout, missing key, API error) so hybrid search can
+    degrade to FTS-only instead of 500ing when the embeddings API is unreachable."""
+    try:
+        client = _get_openai_client()
+        resp = client.embeddings.create(model=_EMBEDDING_MODEL, dimensions=_EMBEDDING_DIMENSIONS, input=[q])
+        return resp.data[0].embedding
+    except Exception as e:
+        _log.warning("query_embedding_failed", extra={"error": str(e)})
+        return None
+
+
+def _vector_literal(values: list[float]) -> str:
+    """Must match the write-side literal format in scripts/backfill_embeddings.py."""
+    return "[" + ",".join(repr(v) for v in values) + "]"
+
+
+def _vector_search_insights(
+    cur, embedding_lit: str, podcast: str | None, category: str | None,
+    video_id: str | None, limit: int,
+) -> list[dict]:
+    where = ["embedding IS NOT NULL"]
+    params: list = []
+    if podcast:
+        where.append("podcast = %s")
+        params.append(podcast)
+    if category:
+        where.append("category ILIKE %s")
+        params.append(f"%{category}%")
+    if video_id:
+        where.append("video_id = %s")
+        params.append(video_id)
+
+    cur.execute(
+        f"""
+        SELECT id, video_id, podcast, category, title, description, start_time_sec, end_time_sec,
+               embedding <=> %s::halfvec AS distance,
+               (SELECT EXISTS (SELECT 1 FROM visual_moments vm WHERE vm.video_id = insights.video_id)) as is_multimodal
+        FROM insights
+        WHERE {" AND ".join(where)}
+        ORDER BY embedding <=> %s::halfvec
+        LIMIT %s
+        """,
+        [embedding_lit] + params + [embedding_lit, limit],
+    )
+    res = []
+    for row in cur.fetchall():
+        res.append({
+            "type": "insight",
+            "id": str(row[0]),
+            "video_id": row[1],
+            "podcast": row[2],
+            "category": row[3],
+            "title": row[4],
+            "description": row[5],
+            "start_time_sec": float(row[6]) if row[6] is not None else None,
+            "end_time_sec": float(row[7]) if row[7] is not None else None,
+            "distance": float(row[8]) if row[8] is not None else None,
+            "rank": None,
+            "headline_title": row[4],
+            "headline_description": row[5],
+            "is_multimodal": row[9],
+        })
+    return res
+
+
+def _vector_search_newsletter_insights(
+    cur, embedding_lit: str, podcast: str | None, category: str | None, limit: int,
+) -> list[dict]:
+    where = ["ni.embedding IS NOT NULL"]
+    params: list = []
+    if podcast:
+        where.append("ni.source = %s")
+        params.append(podcast)
+    if category:
+        where.append("ni.category ILIKE %s")
+        params.append(f"%{category}%")
+
+    cur.execute(
+        f"""
+        SELECT ni.id, ni.source, ni.category, ni.title, ni.description,
+               n.subject, n.author, n.published_at, ni.newsletter_id::text,
+               ni.embedding <=> %s::halfvec AS distance
+        FROM newsletter_insights ni
+        JOIN newsletters n ON n.id = ni.newsletter_id
+        WHERE {" AND ".join(where)}
+        ORDER BY ni.embedding <=> %s::halfvec
+        LIMIT %s
+        """,
+        [embedding_lit] + params + [embedding_lit, limit],
+    )
+    res = []
+    for row in cur.fetchall():
+        res.append({
+            "type": "newsletter_insight",
+            "id": str(row[0]),
+            "source": row[1],
+            "category": row[2],
+            "title": row[3],
+            "description": row[4],
+            "subject": row[5],
+            "author": row[6],
+            "published_at": row[7].isoformat() if row[7] else None,
+            "distance": float(row[9]) if row[9] is not None else None,
+            "rank": None,
+            "headline_title": row[3],
+            "headline_description": row[4],
+            "newsletter_id": row[8],
+        })
+    return res
+
+
+def _filter_hits_by_entity(
+    cur, hits: list[dict], person_id: str | None, company_id: str | None, is_panzerism: bool,
+) -> list[dict]:
+    """Same person/company/panzerism post-filter `_search_postgres` applies to its FTS
+    hits (its own step 3) — duplicated here so vector-sourced hybrid hits get
+    identical treatment, without modifying `_search_postgres` itself."""
+    if not (person_id or company_id or is_panzerism):
+        return hits
+    panzer_id = None
+    if is_panzerism:
+        cur.execute("SELECT id FROM people WHERE LOWER(name) LIKE %s", ("%panzer%",))
+        row = cur.fetchone()
+        if not row:
+            return []
+        panzer_id = str(row[0])
+    filtered = []
+    for h in hits:
+        ins_id = h.get("id")
+        if not ins_id:
+            continue
+        if person_id:
+            cur.execute("SELECT 1 FROM insight_people WHERE insight_id = %s AND person_id = %s", (ins_id, person_id))
+            if not cur.fetchone():
+                continue
+        if company_id:
+            cur.execute("SELECT 1 FROM insight_companies WHERE insight_id = %s AND company_id = %s", (ins_id, company_id))
+            if not cur.fetchone():
+                continue
+        if panzer_id:
+            cur.execute("SELECT 1 FROM insight_people WHERE insight_id = %s AND person_id = %s", (ins_id, panzer_id))
+            if not cur.fetchone():
+                continue
+        filtered.append(h)
+    return filtered
+
+
+_RRF_K = 60
+
+
+def _reciprocal_rank_fusion(rank_lists: list[list[dict]]) -> list[dict]:
+    """score(doc) = sum(1 / (60 + rank)) across each ranked list a doc appears in
+    (1-indexed rank; zero contribution from a list it's absent from). Each input list
+    must already be sorted best-first. Dedupes by `id` — first-seen payload wins, so
+    an FTS hit (which carries `headline_*` snippets) is preferred over a vector hit
+    for the same row. Stores the fused score in `rank_norm`, the field the existing
+    FTS-only path already uses for its (differently-computed) cross-corpus score.
+    """
+    scores: dict[str, float] = {}
+    payload: dict[str, dict] = {}
+    for ranked in rank_lists:
+        for i, h in enumerate(ranked):
+            doc_id = h["id"]
+            scores[doc_id] = scores.get(doc_id, 0.0) + 1.0 / (_RRF_K + i + 1)
+            payload.setdefault(doc_id, h)
+    fused = []
+    for doc_id, score in scores.items():
+        h = payload[doc_id]
+        h["rank_norm"] = score
+        fused.append(h)
+    fused.sort(key=lambda h: h["rank_norm"], reverse=True)
+    return fused
+
+
+def _rescale_0_1(hits: list[dict], field: str) -> None:
+    """Min-max rescale `field` to 0-1 in place — same convention as
+    `_normalize_ranks_by_type` — so a fused corpus's scores are comparable to a
+    plain-FTS corpus's (e.g. moments, which have no vector counterpart) when hybrid
+    mode combines them for the final sort."""
+    if not hits:
+        return
+    vals = [float(h.get(field) or 0) for h in hits]
+    lo, hi = min(vals), max(vals)
+    span = hi - lo
+    for h, v in zip(hits, vals):
+        h[field] = 1.0 if span <= 0 else (v - lo) / span
+
+
+def _search_hybrid(
+    q: str,
+    podcast: str | None = None,
+    category: str | None = None,
+    video_id: str | None = None,
+    person_id: str | None = None,
+    company_id: str | None = None,
+    is_panzerism: bool = False,
+    limit: int = 20,
+    type_: str = "insights",
+    max_limit: int = 100,
+) -> dict:
+    """Hybrid FTS + vector search via reciprocal rank fusion, fused separately per
+    corpus (video insights, newsletter insights) — mirrors how `_apply_source_quota`
+    / `_normalize_ranks_by_type` already treat those two corpora as distinct pools,
+    but replaces the min-max FTS-only ranking with RRF across FTS + vector for each.
+
+    `segments` (timestamp moments) has no embedding column, so that corpus stays
+    FTS-only even in hybrid mode. Degrades to `_search_postgres` (FTS-only) whenever
+    the query embedding call fails — never 500s a search because OpenAI is down.
+    """
+    limit = min(limit, max_limit)
+
+    if not q or not q.strip() or type_ == "moments":
+        return _search_postgres(q, podcast=podcast, category=category, video_id=video_id,
+                                 person_id=person_id, company_id=company_id, is_panzerism=is_panzerism,
+                                 limit=limit, type_=type_, max_limit=max_limit)
+
+    embedding = _embed_query(q)
+    if embedding is None:
+        return _search_postgres(q, podcast=podcast, category=category, video_id=video_id,
+                                 person_id=person_id, company_id=company_id, is_panzerism=is_panzerism,
+                                 limit=limit, type_=type_, max_limit=max_limit)
+    embedding_lit = _vector_literal(embedding)
+
+    # `_search_postgres`'s own DB queries already cap each corpus at `max_limit`, but
+    # its *final* combined-and-sorted slice truncates to `limit` across both corpora
+    # together. Requesting 2x max_limit here keeps both corpora's full max_limit hits
+    # intact so RRF sees complete per-corpus rank lists, not a pre-truncated mix.
+    fts_result = _search_postgres(q, podcast=podcast, category=category, video_id=video_id,
+                                   person_id=person_id, company_id=company_id, is_panzerism=is_panzerism,
+                                   limit=2 * max_limit, type_=type_, max_limit=2 * max_limit)
+    fts_video = [h for h in fts_result["hits"] if h.get("type") == "insight"]
+    fts_moment = [h for h in fts_result["hits"] if h.get("type") == "moment"]
+    fts_newsletter = [h for h in fts_result["hits"] if h.get("type") == "newsletter_insight"]
+
+    vec_video: list[dict] = []
+    vec_newsletter: list[dict] = []
+    conn = None
+    try:
+        conn = _get_db_conn()
+        cur = conn.cursor()
+        if podcast or category:
+            cur.execute("SET LOCAL hnsw.iterative_scan = relaxed_order")
+        if type_ in ("insights", "all"):
+            vec_video = _vector_search_insights(cur, embedding_lit, podcast, category, video_id, max_limit)
+            vec_video = _filter_hits_by_entity(cur, vec_video, person_id, company_id, is_panzerism)
+        if type_ in ("insights", "all", "newsletters"):
+            vec_newsletter = _vector_search_newsletter_insights(cur, embedding_lit, podcast, category, max_limit)
+    except Exception as e:
+        _log.warning("vector_search_failed", extra={"error": str(e)})
+    finally:
+        if conn: _release_db_conn(conn)
+
+    fused_video = _reciprocal_rank_fusion([fts_video, vec_video])
+    fused_newsletter = _reciprocal_rank_fusion([fts_newsletter, vec_newsletter])
+    _rescale_0_1(fused_video, "rank_norm")
+    _rescale_0_1(fused_newsletter, "rank_norm")
+
+    hits = fused_video + fts_moment + fused_newsletter
+    hits.sort(key=lambda h: float(h.get("rank_norm") or 0), reverse=True)
+    hits = hits[:limit]
+    return {"query": q, "total": len(hits), "hits": hits}
+
+
 @app.get("/search")
 def search(
     q: str = "",
@@ -1245,16 +1534,19 @@ def search(
     is_panzerism: bool = False,
     limit: int = 20,
     type_: str = "insights",
+    mode: str = "fts",
     user: dict | None = Depends(_get_current_user_optional),
 ):
-    """Search insights and/or timestamp moments via Postgres FTS. Public for insights; Requires auth for moments. Params: q, podcast, category, video_id, person_id, company_id, is_panzerism, limit, type=insights|moments|all."""
+    """Search insights and/or timestamp moments via Postgres FTS. Public for insights; Requires auth for moments. Params: q, podcast, category, video_id, person_id, company_id, is_panzerism, limit, type=insights|moments|all, mode=fts|hybrid."""
     if type_ in ("moments", "all") and not user:
         # Fallback: if not logged in but asking for 'all', just return insights
         if type_ == "all":
             type_ = "insights"
         else:
             raise HTTPException(status_code=401, detail="Authentication required for timestamp moments")
-            
+
+    if mode == "hybrid":
+        return _search_hybrid(q, podcast=podcast, category=category, video_id=video_id, person_id=person_id, company_id=company_id, is_panzerism=is_panzerism, limit=limit, type_=type_)
     return _search_postgres(q, podcast=podcast, category=category, video_id=video_id, person_id=person_id, company_id=company_id, is_panzerism=is_panzerism, limit=limit, type_=type_)
 
 
