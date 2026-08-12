@@ -31,8 +31,9 @@ export default function InsightCard({ insight }: { insight: Insight }) {
   const displaySource = insight.podcast ? getPodcastShortName(insight.podcast) : (insight.author || source);
 
   const isVideo = !!insight.video_id;
+  const hasTimestamp = insight.start_time_sec !== null && insight.start_time_sec !== undefined;
   const youtubeUrl = isVideo
-    ? `https://youtube.com/watch?v=${insight.video_id}&t=${Math.floor(Number(insight.start_time_sec ?? 0))}`
+    ? `https://youtube.com/watch?v=${insight.video_id}` + (hasTimestamp ? `&t=${Math.floor(Number(insight.start_time_sec))}s` : "")
     : undefined;
 
   const cardContent = (
