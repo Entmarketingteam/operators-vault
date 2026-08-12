@@ -988,9 +988,10 @@ def _search_postgres(
     is_panzerism: bool = False,
     limit: int = 20,
     type_: str = "insights",
+    max_limit: int = 100,
 ) -> dict:
     """Run Postgres FTS search (search_insights and/or search_moments). Returns {query, total, hits}."""
-    limit = min(limit, 100)
+    limit = min(limit, max_limit)
     hits: list[dict] = []
     
     # Handle search modifiers
