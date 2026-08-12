@@ -2608,8 +2608,13 @@ Rules of Voice and Tone:
         )
         agent_res.raise_for_status()
         data = agent_res.json()
+        rc = data.get("returncode")
+        if rc not in (0, None):
+            # See _anthropic_message in insight_extractor.py — the proxy can return
+            # HTTP 200 with a body that looks like success but wraps a failed CLI call.
+            raise RuntimeError(f"agent server returncode={rc}: {str(data.get('stderr'))[:200]}")
         content = data.get("text") or data.get("completion") or data.get("content") or ""
-        
+
         # Format list of citations/sources for the frontend UI
         sources = []
         seen_ids = set()
