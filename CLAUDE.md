@@ -4,6 +4,26 @@
 Searchable knowledge base of DTC operator content: podcast transcripts + newsletter archives.
 Powers RAG-based Q&A for ENT Agency internal research.
 
+## Documentation hygiene — read before "fixing" anything this doc already flags
+This file drifted from the code once already: a `/topic-guide` duplicate-route bug
+was fixed 2026-08-01, but the warning describing it as "not yet resolved" stayed in
+this file for weeks and caused it to be re-reported as a live bug on 2026-09-02.
+That same sweep found a second, still-live duplicate (`/visual-moments`) that no
+test or CI ever caught, because FastAPI silently shadows a duplicate route instead
+of erroring — zero runtime symptoms, so nothing forces anyone to notice.
+Two guardrails now exist against a repeat:
+- `api._check_duplicate_routes()` runs on every startup and logs
+  `duplicate_routes_detected` (loud, non-fatal) if two handlers ever share a
+  method+path again.
+- `test_no_duplicate_routes.py` asserts the same thing; run it before pushing.
+**Rule for whoever (human or agent) resolves anything this file marks with ⚠️ or
+"not yet resolved":** update or delete that warning in the *same* change that fixes
+it — don't leave the fix's rationale only in a code comment. And when a fix retires
+a code path a *different* doc still describes as current (e.g. `web/` vs
+`frontend/`, or a dependency this file no longer mentions), flag or archive that
+doc too rather than leaving two contradictory sources of truth for the next reader
+to guess between.
+
 ## Status: LIVE ✅ (last verified 2026-08-01)
 - **413 videos** indexed across 5 podcast channels; 390 have extracted insights
 - **1,530 newsletter issues**; ~1,190 have extracted insights (backlog draining, see below)
