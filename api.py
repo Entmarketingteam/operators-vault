@@ -125,6 +125,32 @@ def _run_startup_migration() -> None:
             _log.warning("startup_migration_failed", extra={"file": migration_name, "error": str(e)})
 
 
+def _check_duplicate_routes() -> None:
+    """Log (never crash) if two routes register the same method+path.
+
+    FastAPI does not error on this — it silently keeps the first registration
+    and the second becomes permanently unreachable dead code with zero runtime
+    symptoms. That let a duplicate `/topic-guide` handler (persistent caching,
+    never once ran) and a duplicate `/visual-moments` handler survive
+    undetected until a manual audit found them 2026-09-02. This check makes
+    the next one loud on every boot instead of silent forever.
+    """
+    seen: dict[tuple[str, str], int] = {}
+    for route in app.routes:
+        methods = getattr(route, "methods", None)
+        path = getattr(route, "path", None)
+        if not methods or not path:
+            continue
+        for method in methods:
+            key = (method, path)
+            seen[key] = seen.get(key, 0) + 1
+    dupes = {k: v for k, v in seen.items() if v > 1}
+    if dupes:
+        _log.error("duplicate_routes_detected", extra={
+            "routes": [f"{method} {path} (x{count})" for (method, path), count in dupes.items()],
+        })
+
+
 @app.on_event("startup")
 def _on_startup():
     _log.info("Container starting", extra={
@@ -132,6 +158,7 @@ def _on_startup():
         "version": app.version,
         "pid": os.getpid(),
     })
+    _check_duplicate_routes()
     # Run DB migrations for new config tables (idempotent)
     _run_startup_migration()
     # Mark any stale running jobs as failed (from a previous container instance)
