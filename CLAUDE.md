@@ -80,13 +80,17 @@ Two rules follow, and both are load-bearing:
   tuple). `supabase/migrations/*.sql` is the historical record and needs manual
   application. Put anything that must survive a fresh boot in `sql/`.
 
-## ⚠️ Duplicate `/topic-guide` route (pre-existing, not yet resolved)
-`api.py` defines `@app.post("/topic-guide")` **twice** (~line 2441 and ~line 3652).
-FastAPI matches in registration order, so **the earlier one serves and the later
-one — the version with persistent caching — is unreachable dead code.** The
-caching feature has therefore never run. The source quota is applied to the
-handler that actually serves. Decide whether to keep or delete the cached copy
-before touching this endpoint.
+## Duplicate `/topic-guide` route — RESOLVED 2026-08-01
+`api.py` used to define `@app.post("/topic-guide")` twice. FastAPI matches routes
+in registration order, so the earlier handler always served and the later one —
+a version with persistent caching via a `topic_guides` table — was unreachable
+dead code that had never once executed. **Fixed by deleting the dead handler**
+(commit `07283aad`), not by activating it: the cache had no invalidation, and the
+vault corpus changes daily, so a cached guide would have frozen whatever the
+ranking produced on the day it was generated — the exact same stale/podcast-only
+guide bug fixed the same day (see the source-quota note in `api.py` around the
+live `@app.post("/topic-guide")` handler). Restore from git history if caching is
+wanted again, but pair it with real invalidation first.
 
 ## ⚠️ YouTube access: no proxy, residential IP only
 YouTube blocks **datacenter** IPs, which is the only reason the Webshare proxy ever

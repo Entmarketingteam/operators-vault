@@ -1,0 +1,468 @@
+[
+  {
+    "query": "How do I calculate a realistic CAC payback period for a subscription DTC brand?",
+    "relevant_insight_ids": [
+      "3b004b98-a5b0-4238-800b-8d6a3cae5371",
+      "ee0d6f7d-a497-42f2-bec1-19133aeb7a6b",
+      "a034ee20-b8f7-410d-a957-b0b099008dd8",
+      "62c3dbd2-3a87-4ccf-9f42-8aa0543a5be1",
+      "1a76c901-f8db-453b-b32e-1390b38827c6",
+      "af1b9ba7-12f7-49cf-b01f-460f0f1e3408",
+      "ee88bd85-9034-413b-8613-f335b80460ec",
+      "1d589e5e-c4db-4d7a-b89f-08908e770de1",
+      "bbf3ea1e-e868-4680-9864-48f730232387",
+      "44cccd83-8967-417f-9b28-404a254dd6b2"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "763eb7ea-f2b4-42d3-b868-10babc1ce67c",
+      "7ad1a4a6-c261-4aa0-b2ec-30350ff26fcb",
+      "2ac881f5-0942-47ea-8509-58046584b32a",
+      "296006e7-d35b-4245-8b42-333638af7e6a",
+      "9d4463d4-5668-44e2-bb51-212ebf5bde47",
+      "520a9c29-18bf-4f28-91ec-9282ba8a8d09"
+    ],
+    "notes": "Core payback-period math + the underrated point that blended CAC understates true subscriber CAC. Excluded generic OTP-vs-subscription strategy insights that don't touch payback calculation itself."
+  },
+  {
+    "query": "What's the difference between MER and blended ROAS, and which should I actually track?",
+    "relevant_insight_ids": [
+      "76916c22-1d5d-4742-9ae5-e994fe8f1d57",
+      "eae2674e-4cd1-4cfb-bfa0-f81dd5158be6",
+      "1ad2b428-acb6-41d1-984e-c390c118a924",
+      "c0400d5d-d9b4-4199-a823-631518baeba8",
+      "b701f14c-4bf7-4f85-94a9-714dada55a51",
+      "1abf04ff-8241-46d6-a1b0-1ebbbcf33c83",
+      "09af7052-4afc-4649-91a2-14e905f25d74",
+      "0fb7df6f-e8b7-4c77-b2d0-09a5c27cad1d",
+      "1722265b-528f-4cd6-b411-78dcfb3cb129"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "14565a9d-c180-493f-bfd1-b7e1f85916b6",
+      "d6b4b9f5-bd3f-46bd-95c2-ae43132c5f8d",
+      "c282a8dd-93ac-414c-9856-7909e0b846b4",
+      "8d74d52c-ceab-4010-a811-926cea048785",
+      "579192d0-2f3f-483e-8231-697e18eb38f4",
+      "48dba54c-c986-4150-9c9a-3710c6e49bf8"
+    ],
+    "notes": "LEXICALLY DISTANT MATCH: 1abf04ff spells out 'marketing efficiency ratio' in prose without ever using the abbreviation 'MER' -- a query token-matching on 'MER' would miss it on pure FTS. Excluded pure attribution-tooling insights (NorthBeam mechanics) that don't address the MER-vs-ROAS distinction itself."
+  },
+  {
+    "query": "How does a rev share deal work with an affiliate or creator partner?",
+    "relevant_insight_ids": [
+      "cf337cc8-e57a-45f7-9def-0f1fd2acb717",
+      "fb1efbf5-2664-4bfe-a6b0-aedec859f77b",
+      "0fc95484-0333-4ad6-8769-f10d2a13c930",
+      "476b3483-f4f6-4e80-8333-2fe675b3fce1",
+      "5eac55eb-d6e2-4eec-a97a-848b60f6fec5",
+      "8bbb2dc8-5d70-4b66-b77f-1056a0f46253",
+      "1e2a261c-1052-4f0f-b1aa-30ce2a75706e"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "fd41ebd6-413f-4c80-bd77-15a85f0f7b15",
+      "b0068f26-d7bd-49c7-bb37-4ee313a0b7e2",
+      "9be0499f-ff59-4548-90c3-63e96c51ab92",
+      "82bbf384-7038-4cda-87ec-08076b46f731"
+    ],
+    "notes": "LEXICALLY DISTANT MATCH: 0fc95484 ('Physical Retail as Affiliate Model') never says 'rev share' or 'commission structure' as a category -- it says a retailer's 'margin requirement is simply their commission on the sale.' Same concept as rev-share, totally different vocabulary (retail margin framing, not creator/affiliate framing)."
+  },
+  {
+    "query": "How do I build a 13-week cash flow model for my brand?",
+    "relevant_insight_ids": [
+      "e8a8f475-e4a1-4a45-95ff-69a15b3698ab",
+      "f131549e-0161-4eaf-b621-4df60d4189b6",
+      "1924f53e-da50-499f-8536-4ee67869c390",
+      "d3a025fc-8459-4d01-9a7b-41333fda36b6",
+      "2e791a7b-641d-430a-9946-a9e51f032a38",
+      "7dc3d9f3-78b2-4b2a-ae34-cdaab49b537a",
+      "c5bc81bc-9374-4082-b56b-69fe44ed6c7a",
+      "ab676ead-c442-430d-a848-f935c11e8947",
+      "d62b4e44-3ef0-47c6-b596-dbd2fd2270a0"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "e35d6c49-af5b-4f9b-906c-2a69e577d7e3",
+      "2c8a7ced-cfc5-415a-8fdb-09ac9f516ff0",
+      "03620fe7-505a-4d5a-aff2-5b7204f52fd7",
+      "f37939be-2c6d-4642-b542-9fa55f525bd5",
+      "e46dee3b-da65-4cd6-977b-6b29dff29ca4",
+      "6aba0d13-738f-417f-b569-3dfe348dfe2f",
+      "119174e5-9da7-4a04-9df2-fbedd3597cfe"
+    ],
+    "notes": "Heavily literal-match topic (nearly every hit says '13-week cash flow' verbatim) -- kept the set diverse (build process, cadence, why-13-weeks, real operator examples, debt-covenant use case) rather than including every near-duplicate newsletter hit."
+  },
+  {
+    "query": "What's contribution margin and why does it matter more than gross margin?",
+    "relevant_insight_ids": [
+      "caf04bdd-a4ed-4154-9e39-19c09ef0b83b",
+      "d8a42fbd-9946-4b28-9dc7-14e3db689e0a",
+      "7e09d748-8e6a-43c7-9b62-cb5c0325a72b",
+      "95308715-7047-4ceb-b84c-2fc0a703c0f0",
+      "d47514d4-4f69-4d11-be38-b9c025d41076",
+      "1b829f76-1882-4f84-a17e-e247458b43f0",
+      "6912e797-755c-4fdb-b129-17747aa6924a",
+      "02196357-c4f8-4395-8cc1-d4057d9e15e8"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "fbc17eb6-46de-4463-b7b1-c10a92cda94b",
+      "130c70dd-199d-4d36-8f26-78ebf6df20f1",
+      "b57dd7d8-271c-48d5-b5ad-9ca447bdeb16",
+      "e1d079f8-aa0f-406b-b662-138858b07872",
+      "d28aa945-1292-4690-8bbc-fa6320b63e45",
+      "b7b769f2-d73e-4185-b063-4ef879749ae1",
+      "90ad9724-c42e-446e-83b6-ee38383e294f"
+    ],
+    "notes": "Includes the gross-margin-vs-contribution-margin distinction explicitly (882911b9, caf04bdd, d8a42fbd) plus the 'why it matters more' argument (d28aa945 vanity metrics, fbc17eb6 real profitability)."
+  },
+  {
+    "query": "How do I know when it's the right time to raise prices?",
+    "relevant_insight_ids": [
+      "9564b2c0-4cf1-4164-9c3e-c5d275dbe947",
+      "e038a197-9a9b-4994-8bad-1a28e3f13f8e",
+      "1dd24c17-a0e1-4cdf-9e7d-c4952e43a5cc",
+      "35fd0eff-9b39-4552-9566-954b63316c3e",
+      "dbc0606e-e80c-421d-b9a3-e4e4c2c26654",
+      "4250abc8-2eb6-4a0e-8974-f6a819934c49",
+      "9a68615e-a4d2-4bac-b96f-e2f1d5fe95fd",
+      "529e937b-7e87-4f9d-8176-35ad6dcc42bd",
+      "0004d308-c1be-4f53-b955-a5cf8ea6d0ba",
+      "9f6760af-a5ec-4c79-8b69-5a5cbef72ac9"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "8a793455-8fe9-486f-8755-7d7b9bf464bb",
+      "a69e755a-6d05-4d15-b555-6b979032b860",
+      "d53b05b2-8f67-4784-b7f4-593cbb553fc3",
+      "d107905d-67f3-414f-afc8-b4447807a1f3",
+      "94a6a27e-d8ea-427a-b642-fa2766796514",
+      "a8eb36dc-c4e0-4125-a10d-af0fe922f173",
+      "7e6078af-5887-41fd-ba77-150044dd5141"
+    ],
+    "notes": "PMF-via-pricing-power framing (9564b2c0) is the conceptual core of 'when'. Included the counter-signal case (Midday Squares refusing to raise on cocoa spike, innovating instead) as a legitimate 'not yet' answer."
+  },
+  {
+    "query": "What should my welcome email flow actually contain to convert new subscribers?",
+    "relevant_insight_ids": [
+      "00f0b235-fa30-4ae6-9c2c-0bd1ad3c025d",
+      "97e85691-64ac-46d4-9f9c-12703f6f9b04",
+      "ffde11f0-87e0-4e20-a71c-c225b7de7c01",
+      "e7e82edb-328b-4d9b-8781-903c71953d3c",
+      "747463e3-2cf7-427c-9390-090259ec4b60",
+      "c92c839e-7ff5-4234-b18b-dead5493d1e7",
+      "5a6a614a-a012-4692-9fea-861af6e144ee",
+      "372693ec-37db-407a-8048-296bdd6cd73e"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "d599fb5b-eae2-4713-9a61-342b3355a8e5",
+      "3f45cfdc-c859-4db2-b341-10590998bd9f",
+      "be8c2c47-5673-45f9-bab0-a28e8a44b47b",
+      "82130c13-ea6d-47ca-a6ab-abed75147582",
+      "be09b1cf-60f8-49ca-9e4c-930c3b720f6c",
+      "a8a40458-7efa-485b-bd30-11c3f658a50d",
+      "a3db46a0-ea25-4f08-b2e4-070e84ba7c20",
+      "e9b8315e-263a-400a-a23a-252e35f1ce7e",
+      "1b3289ce-0743-4c49-b9fe-0c24f0a28188",
+      "fdc1a677-36d0-4393-b8da-048b01e39476"
+    ],
+    "notes": "Heaviest-hit topic in the whole set (74 newsletter candidates alone) since 'welcome flow' is a recurring newsletter beat -- picked content-prescriptive insights (what to include, in what order) over pure cadence/stats insights, plus two useful counter-signals (don't pad, don't lead with brand story)."
+  },
+  {
+    "query": "How much safety stock should I hold for a fast-growing SKU?",
+    "relevant_insight_ids": [
+      "2fc29432-2f12-448c-8575-0b3260e8b3e7",
+      "15b9ccc5-eed4-4b69-92e4-437d8b3c6658",
+      "2de82668-306a-4a82-84cb-a095f29e9677",
+      "68f5258b-f5a2-4743-926b-45ca1aaf93e6",
+      "21432bd8-4c37-4c3b-adaa-ece9e18c1c53",
+      "a66462aa-0bee-4bfd-96c4-997f0afe7073",
+      "020d0030-5174-45f2-9a19-cbafb53b1255",
+      "fb292d0c-2ba7-42a8-b654-a422be991eb1"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "17fcf0f3-b80c-4c40-82aa-270169160a92",
+      "815f8d68-77bb-42bf-aa45-7697e9ccdeaf",
+      "311df5e8-b18b-4982-8cc1-3b9e60a9bc71",
+      "37a6dc66-ad87-499c-b24a-8703127fcacf",
+      "38279bc9-5367-4ef8-98c1-558cbab7b882",
+      "03815da2-ef75-47e4-913d-bb619da66cd8",
+      "1a4dd57f-9ed1-4eab-b80e-7f32140318e9"
+    ],
+    "notes": "No insight in the corpus gives a formula for safety-stock units -- the honest answer is qualitative (buffer for the ~30-50% ocean-schedule unreliability ceiling, lead-time/growth-rate framework, real stockout post-mortems). Excluded generic 3PL/ERP product-pitch rows."
+  },
+  {
+    "query": "What do investors actually look at when deciding whether to fund a DTC brand?",
+    "relevant_insight_ids": [
+      "91896237-8609-40e0-9dee-ba8fb6d1e852",
+      "cd40d071-d491-4179-b45f-22a7aa5280ba",
+      "93755855-909e-42f6-95cb-13b7460968b4",
+      "6ed9ced5-b2a5-48d1-8254-aad90b6a1612",
+      "449d51e2-1672-40ef-acaa-de6684822e27",
+      "b46122b4-3d19-4cf4-8679-6d44e9159ca2",
+      "08deb48b-5ba7-4aa1-9db4-cdb0e2a08250",
+      "2bc028be-99ae-476a-aa3a-3ee880324b00",
+      "9ebb86b8-6b69-4a95-b938-13ff8ddd792d",
+      "96d26d3e-98c2-40f8-bb6e-074f0e94e860"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "a57a5604-76c8-4056-b0d7-3723f1f9f33d",
+      "a5e8c068-c4df-4b02-922d-71449fa57ce3",
+      "cfbae639-322f-4c36-8ed3-86874a456067",
+      "eee073b1-3640-40c6-92a7-f7a57a56fec6"
+    ],
+    "notes": "LEXICALLY DISTANT MATCH: 449d51e2 ('Low-COGS DTC brand as investor magnet') never uses the words 'invest', 'fund', or 'raise' in its title -- it's phrased as a brand-attribute insight, but the description is literally 'the current sweet spot for investors.' Excluded the batch of individual funding-round news items (Create, Frozen One, Alice Mushrooms etc.) as those are events, not answers to 'what investors look at.'"
+  },
+  {
+    "query": "How many creative variations should I be testing per week on Meta ads?",
+    "relevant_insight_ids": [
+      "ad80923e-4a5a-45e2-9769-76f0e71e2cbd",
+      "d65b2ac2-3321-40b7-acbd-ceee7d35b5f3",
+      "c820ca30-84a9-44b3-961a-f473098d2b00",
+      "a9778e76-f386-44dd-a6a4-b2b1abefc531",
+      "a2c6547f-bfe1-4d29-be2b-33c4c8a1b43c",
+      "bd7fcb84-5715-4a7f-9bf8-35837d96df72",
+      "ff1311b3-58ae-41d5-8d79-c109feca5cb6",
+      "d54e4a66-1b0a-4106-a089-829f23c1c185",
+      "2facd325-d69e-46c4-aea7-23e4f8a40126"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "50bc40d1-9472-4920-8ee2-779b20595cab",
+      "737e361f-25b2-423d-8f16-8e3b8b92e3bd",
+      "b51c2312-e534-4ced-bbfe-4369be94fb5a",
+      "77f0352c-02dd-48cf-9e1f-c510834268d6",
+      "9a7bf323-edb3-4296-96d4-2521998869d0",
+      "11570407-05a4-4f17-aec4-4e4025c97d68",
+      "35a8980c-e7ff-4a7f-ac3f-3a447cf77df4",
+      "bc35ca9c-c120-4add-9028-2ca441a22675"
+    ],
+    "notes": "Answers span a wide legitimate range (3-6 to 1,500/week) so kept both the concrete cadence numbers and the two counter-arguments (fewer-better-concepts, more-ads-isn't-the-fix) since a real operator needs that nuance, not just a single number."
+  },
+  {
+    "query": "How does subscription churn get reduced without just discounting my way into it?",
+    "relevant_insight_ids": [
+      "ec8806b4-b3e7-4b21-b815-5eceaa760405",
+      "69f8ab9e-4e3f-4114-9c82-46b00037d4ca",
+      "dbfb0473-65fa-4a36-a1f0-ce930fe95400",
+      "4b0dfebb-7d56-4159-b54c-eb352aa8d9a9",
+      "3f2f5bfc-e37e-4d92-a95c-79eb86773436",
+      "65863dbb-fdfb-49e2-a6ed-d9fd87547e66"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "ee14eae7-c98f-4437-8a8d-23ed22a61223",
+      "3b358fcb-9f8c-4485-aa49-53bdf9985cbc",
+      "3d82c1fb-e1b7-49f6-b707-be7cdc275656",
+      "5e5b1f75-09a3-421c-88e0-6c86c0eba0fe",
+      "047264ea-7097-40c3-bb8e-94f0a9853660",
+      "739c0435-a242-4edd-9ed4-a762a8da8944",
+      "db6559c4-d779-4cf9-b9c9-f309fd80ac16",
+      "94d20ac1-cc75-4796-9b01-e46bdd451fe6",
+      "bb862826-47a3-401c-81a5-f3d75712bad4"
+    ],
+    "notes": "5e5b1f75 ('Stop fighting churn at the cancel screen') and 3d82c1fb directly address the 'not discounting' angle -- prevention (flexibility, cadence-matching) beats win-back-offer discounting. Excluded generic post-purchase-upsell / AfterSell product rows that surfaced on 'subscription' but aren't about churn."
+  },
+  {
+    "query": "What's whitelisting/dark posting and why would I want a creator's ad account access?",
+    "relevant_insight_ids": [
+      "af7f41ab-fa1b-437d-bb1b-7c8b89d6c013",
+      "f0050453-5962-4f34-8d67-9e8306195b8c",
+      "c40ab389-a24e-4c7f-b15a-08bc40598398",
+      "b9a95277-8646-4602-bc94-241eff25f718",
+      "0bea32d7-a6ec-48af-8c89-88551d4f8e54",
+      "6fd86eb3-f8b0-4151-9476-dc18c5033a8c",
+      "223cb84f-9f15-4600-9199-85e641c72587",
+      "8f6fe3cb-8059-467d-b7ad-a2bf0b50db86",
+      "c379409e-a916-4ddd-ae77-d19f3df67c11"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "c268e922-6248-417b-ad60-9cd6d09ac0b2",
+      "cd8dc8d8-7f4f-4d76-8bd1-a8394260a296",
+      "47741d9a-115c-4e83-97cf-810a1fa5d239",
+      "d38b4de3-7b57-4c95-877d-14503fa6f5b8",
+      "c4a24c74-2661-4e84-8e07-d14dafa72ccd",
+      "a2b91eee-3add-4f02-903f-5f30c2a4fab4",
+      "489860ad-6dc3-4982-9128-501b0ce25efd"
+    ],
+    "notes": "d38b4de3 and c4a24c74 cover the Meta rebrand (whitelisting -> Partnership Ads) which is essential to answering 'what is it' accurately today. Excluded the long tail of near-duplicate platform-pitch rows (Insense appears 3x nearly verbatim) keeping one representative instead."
+  },
+  {
+    "query": "How should I think about wholesale vs staying DTC-only as I scale?",
+    "relevant_insight_ids": [
+      "fb2f91d3-f189-41e2-b61e-e3363f7ef870",
+      "0531cfd6-79be-4309-b77e-e36ce873d3fc",
+      "dbeb62b7-d85e-4fd9-ba8c-29db74adf8e4",
+      "afd51547-5d09-4a09-84e4-1b0f32c96677",
+      "55210bf0-9991-4388-a2f6-65da70170f3d",
+      "3f62cba5-ab80-4c03-850b-cc69c239299b",
+      "ae66395d-d9f6-4249-82e4-d69e08a2c67a",
+      "cc0eaa33-f5e8-40a8-8154-4add374861fb",
+      "49695b64-bf94-425e-8d73-a92806594e20"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "c86635aa-5abd-492d-808e-113754c715d4",
+      "fbb2daa6-fc57-4a60-8b98-d4bf00f2f412",
+      "428bc6ef-bfec-4299-9029-1d3e6565e70b",
+      "7e2cbcab-c5bf-4c66-8228-d1f08d736426"
+    ],
+    "notes": "Balanced set: pro-wholesale (diversify-or-die, iOS14 forcing pivot) and anti-wholesale (control loss, bankruptcy counterparty risk) so the gold set doesn't encode a one-sided answer to a genuinely contested question."
+  },
+  {
+    "query": "What org structure or team should I hire first as I scale past $5M?",
+    "relevant_insight_ids": [
+      "45cd4a2e-6876-414d-887b-8b67fd4f8910",
+      "4afcf196-c2d9-40e8-9818-c351d35887e2",
+      "324ff4d3-5959-4273-b40b-ac9cbcbafede",
+      "f49d6117-24c4-4acc-adcc-f0c13496ee6e",
+      "0a32b91f-7ae2-48ba-b2b7-d2df5d3b1846",
+      "cffaa1ee-b767-4dc5-ab51-eddd27007c32",
+      "fe012ae6-221e-4cee-bff3-43bec75569fd",
+      "161e6ca6-9321-400e-847a-eec07e0e6698",
+      "b5ce3c52-1eba-4eb0-9e3a-0e9905a4c50f"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "071c0f9b-99ec-43d6-9188-f007065d96a3",
+      "c73b8cac-814d-405d-a417-aea83ebb51cc",
+      "02c68f7b-955d-4c1c-8f89-3b1e545d79fd",
+      "38dd01ff-f4e0-4ac1-a4ca-691f0e3f5b59",
+      "7af9b3f6-a9f0-474d-b667-c85208bc7a20",
+      "3ddd1233-c359-47eb-93ca-6de8ae45762d",
+      "bf6849ef-741e-4534-95fc-a6e268f88138",
+      "4815e942-94c7-4603-829e-70f901e4dbdd"
+    ],
+    "notes": "071c0f9b gives an explicit revenue-staged sequence (CS -> inventory -> agencies until $5M -> controller ~$20M -> no CMO until $500M) which maps directly onto the query's '$5M' anchor. Excluded the long MarketerHire sponsor-plug repeats (6+ near-identical newsletter rows)."
+  },
+  {
+    "query": "How do tariffs and COGS increases actually hit my margins, and what do I do about it?",
+    "relevant_insight_ids": [
+      "bc218766-0c73-4a3a-8655-5593dd65dc49",
+      "3a7484f5-6516-417c-8df5-e8d4a29731dd",
+      "5ea9302f-942d-4588-b943-d3f0a9bea9b3",
+      "ab6dcb79-254b-4d94-a8a5-f54cd3947468",
+      "ac592561-2b19-4e4d-9eb7-767375befd3d",
+      "d45ac4eb-7a9d-46c4-b5b2-87a564661eed",
+      "68b3e930-94d9-49f2-8036-95e8d4f5b513",
+      "6f7c29d0-bdaa-4ea0-bca5-1e291f8ef1ca",
+      "998038ca-4315-4df7-be52-9bc30b05d8d4"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "8c4f4f04-d62a-4b0f-8b2b-e6919bf84a9b",
+      "81bc18b3-bd7d-440a-a169-09dbf466011c",
+      "6cf0b1a8-4702-4282-8447-4c512872fab4",
+      "a8380fd0-f153-4de4-840f-bbe4fb3f3228",
+      "73ef7373-f211-44ea-a00e-f47c857503e1",
+      "fca20249-3099-4ed8-9079-42df7a77ff8f"
+    ],
+    "notes": "68b3e930 ('tariffs are a fixed-cost tax, not a profit tax') and ac592561 (COGS multiplier at retail) directly explain the mechanism of 'how it hits margins'; ab6dcb79 and the newsletter set answer 'what do I do about it' with a concrete lever order. Excluded the large batch of pure news-event rows (individual brand tariff anecdotes with no generalizable lesson)."
+  },
+  {
+    "query": "What's a good way to calculate customer lifetime value (LTV) for a young brand?",
+    "relevant_insight_ids": [
+      "57cfca72-8efa-453a-a24c-4616e5168989",
+      "88cc930c-1af2-4035-8361-d17bcbb98aaa",
+      "3303be54-0e71-4bd8-998e-6bb0eb2d99a8",
+      "6912e797-755c-4fdb-b129-17747aa6924a",
+      "ee0d6f7d-a497-42f2-bec1-19133aeb7a6b",
+      "02196357-c4f8-4395-8cc1-d4057d9e15e8"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "7991ceec-f775-48a6-bfd9-5927278b05d8",
+      "07a90885-91ca-4399-9879-621e0851e63e",
+      "ee87ed9d-691a-409c-ba90-c9bc31a2bddb",
+      "320bd3a6-c319-4881-b5c9-ee72972d24fe",
+      "1a89a8f0-454d-4cb4-bb43-01dc3eebed25",
+      "c5dcaef8-b5e7-4493-9de2-aff2fb0a0b39"
+    ],
+    "notes": "'Young brand' points toward ee87ed9d and the Cody quote (57cfca72) specifically -- both explicitly address not needing 12-24 months of data before acting on early cohort signal, which is the actual answer for a brand too young to have mature cohorts."
+  },
+  {
+    "query": "How do I set up media mix modeling or attribution beyond last-click?",
+    "relevant_insight_ids": [
+      "fe926eb2-50ec-4c83-b1a6-08feceb8051a",
+      "ab8f372c-b294-4853-a36d-e9474ef0e237",
+      "eeb0d4fb-7659-44ca-89a4-30db25e04084",
+      "0a8b127e-5069-48c1-a124-a6102805555f",
+      "15266b32-04c7-4677-86ce-aec88d6c9ae5",
+      "941bf1d6-edd6-4493-8276-4330d4fe4dd0",
+      "a9c3ab29-cde1-4302-b933-3c30f0116d44",
+      "f5390e4b-2d9e-4674-aff5-964d5949e5ea"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "fa15dfd5-1efb-4834-85d3-e2efde64d85a",
+      "0e58347a-6445-4f4f-b36f-bc72b129018c",
+      "31829f1a-9cc5-4704-a584-2a75bcc7e0a4",
+      "2eb835e5-f329-43d0-a572-4f9f89ad4e4d",
+      "64a5260a-0646-4b32-9128-c48786668d79",
+      "c02925f5-fc2e-478a-bbd0-c8333161d404",
+      "faed30b7-f9e6-4dd4-aaa2-067f1f01d669",
+      "5fb269cd-f8f8-4fab-ba8a-40e325b35e10",
+      "afda94df-78df-43bc-b4e6-39aa2aa0d0f3",
+      "500a9dec-b44d-42c7-ac09-c50e9e57fd34"
+    ],
+    "notes": "This topic's raw FTS pull was dominated (~50+ of 75 insight candidates) by near-identical Northbeam sponsor-read rows ('multi-touch attribution and media mix modeling platform...') -- excluded essentially all of them as non-substantive ad reads and kept only rows with an actual mechanism, threshold, or methodology. This is the single most duplicate-heavy topic in the corpus."
+  },
+  {
+    "query": "How should I plan my promo calendar around Black Friday/Cyber Monday?",
+    "relevant_insight_ids": [
+      "3a7a1c53-6cbc-42ea-acb8-3f73da487c88",
+      "122c05ee-2cf7-4fe6-9f2c-e750f107927d",
+      "268626b3-e325-4202-9bff-8377ac71d724",
+      "ca3fe3f0-64ec-4349-be6a-0321c8ec5f93",
+      "00dbf60a-7303-49cf-b1f0-0f07dc312036",
+      "2623a92a-79f8-4df8-b4d9-9741080ece8d",
+      "178b65e5-c1ff-4392-a553-110305190266",
+      "3ac3b8a6-e3a7-48dc-bf7f-67c5a4f6e473",
+      "ecd7ff30-1627-4b85-ac23-3c5594cea011"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "0a1eefd7-01c1-41c8-ac3a-f2483eccad08",
+      "447155d6-1665-4e42-a942-12196b9afab4",
+      "0b9a9bd4-5d68-46d6-89ab-e03cf305b5c7",
+      "76accf4f-8fef-4abe-9191-0db82657d1a4",
+      "4016b361-a1ad-4a78-a2bd-5bfa0d999d2c",
+      "11fba851-4ed0-4395-9c6f-3efb955fcb37",
+      "1a6e8c0c-d4cb-4d77-8f97-9234c81ec797",
+      "59305a75-e316-40e5-91c7-f2e5d7339caa"
+    ],
+    "notes": "Mixes concrete calendar mechanics (76accf4f exact peak dates, 3a7a1c53 Ridge's real geo-segmented calendar, hour/day timing data) with strategic caution (11fba851: BFCM buyers are the lowest-LTV cohort, so the calendar question isn't just discount depth)."
+  },
+  {
+    "query": "What's the actual ROI of post-purchase upsells and how do I set them up?",
+    "relevant_insight_ids": [
+      "8bdfd11d-393e-444e-a62d-7a7571c5bbaa",
+      "71d9cfe6-c3c8-45fe-852a-3d8e918fd535",
+      "d137cb12-91fc-4a77-8db6-88759caec382",
+      "edab1d3b-7c47-416c-a131-d4957d4cc640",
+      "3bf101b5-9e46-4379-9543-22a32c2c305d",
+      "681851e0-077d-4178-94c6-041834a4dadc",
+      "9862723f-031b-429d-8300-b03c0de735b4"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "65b6b4e3-d34a-4c33-a276-e47ce5ebd937",
+      "ca9df52b-36df-4e9a-92b3-6dbb21cf8990",
+      "342e501a-543d-49bd-af5f-c0798321fa22",
+      "f7bf8924-6307-4197-a624-b09b944835fd",
+      "95e44d27-697d-47a2-9c5d-ade8ce8c73b5",
+      "0db9309f-619b-4d86-b3c4-1ed3bcf99d21",
+      "c8a7b9df-1fec-4694-92c1-48789827e73c"
+    ],
+    "notes": "This is the single most duplicated story in the whole corpus -- the identical 'host bought 3 HexClad pants instead of 2 because of an AfterSell post-purchase offer' anecdote appears verbatim across 6 different insight rows (9862723f, f702e6f0, ca64a4ba, ae2a4ee2, cad5b2e0 -- likely the same ad read transcribed across multiple podcast episodes/re-airs). Kept exactly one. Also kept edab1d3b as the honest ROI caveat (some brands pull the feature over a trickle of CS complaints despite the revenue lift) rather than only the upside numbers."
+  },
+  {
+    "query": "How do I think about the payback period on paid social spend when scaling budget aggressively?",
+    "relevant_insight_ids": [
+      "9a548fa4-42ec-4b32-ba57-418b7a2917fe",
+      "34cc074b-feba-4d92-8aeb-ffbf4db49006",
+      "5ae11868-c74e-4cb5-9a7c-40996a522852",
+      "58315113-1750-4016-ae66-b47a3b093550",
+      "e221893e-303a-486b-9463-0e46f40fc187",
+      "4dffacfd-e7eb-48b4-9fe3-dedda6b03366",
+      "861d773c-2e80-407e-a53c-062217497983",
+      "d4b0d06d-bf1e-495e-aeff-4e36c5861bd0"
+    ],
+    "relevant_newsletter_insight_ids": [
+      "bcbb7530-d326-4aec-b71c-b41c53d91ed9",
+      "ac78c1de-312c-40e6-9073-afaf04e5f997",
+      "395acc40-9ad1-4085-8f50-dda09efdb0fc",
+      "d613100d-8eac-4a81-94c0-d6076bb7461a",
+      "8609f5a2-a44a-4757-8dc3-b614aae90aba",
+      "976033e0-8b72-43ab-9271-90e565ea0bc3",
+      "0f1e0939-28cb-4166-9d57-d17e1c4e99d4"
+    ],
+    "notes": "34cc074b gives the sharpest concrete answer: a 50% scale-up stayed profitable/incremental at BFCM while a 100% scale-up crossed into non-incremental territory -- direct evidence that diminishing returns bite well before operators expect, which is the crux of the query."
+  }
+]
