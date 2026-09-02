@@ -4257,18 +4257,26 @@ def list_newsletter_insights(
             _release_db_conn(conn)
 
 
-class TopicGuideRequest(BaseModel):
-    topic: str
-
-
-# NOTE: a second @app.post("/topic-guide") handler lived here with persistent
-# caching via the topic_guides table. It was unreachable — FastAPI matches routes
-# in registration order and the handler defined earlier in this file always won —
-# so the caching never once ran. Removed rather than activated: the cache has no
+# NOTE: a second @app.post("/topic-guide") handler (and its own TopicGuideRequest
+# request model, without a `limit` field) lived here with persistent caching via
+# the topic_guides table. It was unreachable — FastAPI matches routes in
+# registration order and the handler defined earlier in this file always won — so
+# the caching never once ran. Removed rather than activated: the cache has no
 # invalidation, and the vault corpus changes daily, so a cached guide would freeze
 # whatever the ranking produced on the day it was generated. That is exactly the
 # failure mode just fixed (podcast-only guides persisting). See git history to
 # restore it if caching is wanted, with invalidation.
+#
+# The dead handler's own `class TopicGuideRequest(BaseModel): topic: str` used to
+# sit right here. It looked inert but wasn't: Python rebinds the module-level name
+# on every `class`/`def` statement, so this second definition silently shadowed
+# the real one (api.py:2765, which has `limit`) for any code that looked up
+# `api.TopicGuideRequest` after import — which is exactly what test_topic_guide.py
+# does. That test passed for weeks because it happened to only exercise the
+# `topic=""` and 404 paths; the moment a real caller tried to read `body.limit`,
+# it hit `AttributeError`. Found 2026-09-02 by running that test after removing an
+# unrelated duplicate route. Deleted for real this time — don't recreate a second
+# TopicGuideRequest here even as a "just the model" stub.
 
 
 
