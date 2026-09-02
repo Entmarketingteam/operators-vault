@@ -36,7 +36,10 @@ class TestTopicGuide(unittest.TestCase):
         print("[PASS] Non-existent topic properly returned 404.")
 
     def test_topic_guide_successful_flow(self):
-        print("\nTesting successful topic guide generation and cache loop...")
+        print("\nTesting successful topic guide generation...")
+        # Caching was deliberately removed 2026-08-01 (no invalidation, vault
+        # corpus changes daily) — do not assert cache_hit/identical-content-on-
+        # rerun here. See the NOTE above api.py's live /topic-guide handler.
         request = api.TopicGuideRequest(topic="Creative Testing")
         try:
             res = api.topic_guide(request)
@@ -46,17 +49,9 @@ class TestTopicGuide(unittest.TestCase):
             self.assertIn("sources", res)
             self.assertEqual(res["topic"], "Creative Testing")
             self.assertTrue(len(res["content"]) > 100)
-            
+
             print(f"[PASS] Generation successful. Content length: {len(res['content'])}")
             print(f"[PASS] Sources citation count: {len(res['sources'])}")
-            print(f"[PASS] Cache Hit (First run): {res.get('cache_hit')}")
-
-            # Verify database caching works on the second run
-            print("\nTesting cache hit loop...")
-            res2 = api.topic_guide(request)
-            self.assertTrue(res2.get("cache_hit"))
-            self.assertEqual(res2["content"], res["content"])
-            print("[PASS] Cache hit is functional and returns identical content instantly!")
 
         except HTTPException as e:
             # If the third-party agent complete server is temporarily unreachable, skip gracefully
