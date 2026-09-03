@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # APIs and env – what you already have vs what’s new
 
 **Context:** The app is already running on Railway (API) and Vercel (front-end). This doc clarifies what’s already wired, where the database lives, and what (if anything) you need to add only for the *extended* plan (chat, embeddings, TITANS, etc.).

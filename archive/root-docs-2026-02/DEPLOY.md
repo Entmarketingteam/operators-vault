@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Deploy Operators Vault on Vercel
 
 The static front end in `web/` calls the Railway API. Nav links (Discover, Listen, Catalog, People, Ask, API) point to Railway-hosted pages (`/search-ui`, `/episodes-ui`, `/insights-ui`, `/people-ui`, `/ask-ui`, `/docs`). Pushing to GitHub updates both Railway (API + all UIs) and Vercel (this `web/` site) when the repo is connected to both.

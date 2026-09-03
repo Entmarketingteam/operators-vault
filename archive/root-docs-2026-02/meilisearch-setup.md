@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Meilisearch Index – Operators Vault
 
 Index name: `operators_insights`

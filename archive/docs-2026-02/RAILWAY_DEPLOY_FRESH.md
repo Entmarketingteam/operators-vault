@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Railway: Stuck cron + stale main deploy
 
 ## Delete cron and recreate (stuck run still going)

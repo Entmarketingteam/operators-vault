@@ -8,6 +8,7 @@ alwaysApply: true
 ## Single source of truth
 - **GitHub** is the source of truth. **Local** should match it. **Railway** deploys from GitHub.
 - So: fixes and agent modifications belong in this repo, committed and pushed, so debugging can stay in Cursor.
+- **`CLAUDE.md`** at the repo root is the living doc of current app state (what's live, what broke and why, what to never reintroduce). Read it before trusting any other doc in this repo — several were archived 2026-09-03 for going stale after `CLAUDE.md` became canonical.
 
 ## When you (the agent) change code
 - After making fixes or feature changes, **commit and push** so the user's local and GitHub stay up to date:

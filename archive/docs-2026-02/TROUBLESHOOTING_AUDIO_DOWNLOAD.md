@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Troubleshooting: Audio download failed on Railway
 
 If sync runs and **fetch-new** succeeds (videos upserted) but every video shows **`[audio] download failed`**, the pipeline never gets transcriptions or insights. This doc explains likely causes and workarounds.

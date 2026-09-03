@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # CSV and YouTube API mapping
 
 How the scraped (Chrome-extension) CSV and the YouTube Data API map into Operators Vault.

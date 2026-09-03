@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Operators Vault — Ask Page RAG QA Report
 **Date:** 2026-03-27
 **Backend:** `https://superb-smile-production.up.railway.app`

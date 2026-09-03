@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Keep local, GitHub, and Railway in sync — debug in Cursor
 
 **Goal:** One source of truth (this repo). Local = GitHub. Railway deploys from GitHub. All fixes and agent changes live in the repo so debugging stays in Cursor.

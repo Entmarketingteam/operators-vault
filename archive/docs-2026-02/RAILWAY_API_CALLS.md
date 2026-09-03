@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Railway API calls – sync and process
 
 Use these so sync/process return **202 immediately** and run in the background. Avoids 502 "Application failed to respond" from long-running requests.

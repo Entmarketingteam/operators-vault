@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Deployment env – Railway & Vercel (editable on your end)
 
 All credentials and URLs are **editable only in your dashboards** (Railway → Variables, Vercel → Environment Variables). This repo has no secrets; it only reads from env. Use the tables below to set everything in one place.

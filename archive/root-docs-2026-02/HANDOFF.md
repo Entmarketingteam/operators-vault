@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Operators Vault – Developer / Agent Handoff
 
 **Read this first when picking up in a new session.** Repo: https://github.com/Entmarketingteam/operators-vault

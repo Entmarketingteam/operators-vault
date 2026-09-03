@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Using Doppler for credentials (local & scripts)
 
 You’ve already run `doppler login`. Use Doppler as the single source for API keys and Supabase credentials when running scripts and migrations on this machine.

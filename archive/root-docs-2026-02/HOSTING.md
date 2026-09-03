@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Hosting Operators Vault (like mfmvault.com)
 
 Get the app live at a custom domain so people can use the search UI and n8n can keep syncing.

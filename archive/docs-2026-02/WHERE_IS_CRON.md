@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Where is the cron job on Railway?
 
 The **cron is a separate service**, not inside superb-smile.

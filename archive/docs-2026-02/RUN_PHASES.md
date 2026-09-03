@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Running the phases: pull data and process
 
 Run these from the project root with `.env` containing at least `DATABASE_URL` (Supabase connection string). For YouTube fetch you also need `YOUTUBE_API_KEY`.

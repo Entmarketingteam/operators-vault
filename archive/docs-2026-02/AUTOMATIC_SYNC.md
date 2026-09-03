@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Automatic Sync – New Videos Auto-Processed
 
 Set up automatic sync so new YouTube videos are fetched and processed as soon as they're posted.

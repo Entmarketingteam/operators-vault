@@ -1,3 +1,5 @@
+> **ARCHIVED — historical, does not reflect current state.** See `CLAUDE.md` at the repo root for what is actually true today. Archived 2026-09-03.
+
 # Operators Vault – Plan & Status
 
 **Purpose:** Single source for plan, current status, and next steps. Keep this open when handing off.
