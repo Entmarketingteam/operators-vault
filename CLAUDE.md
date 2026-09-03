@@ -24,6 +24,24 @@ a code path a *different* doc still describes as current (e.g. `web/` vs
 doc too rather than leaving two contradictory sources of truth for the next reader
 to guess between.
 
+**2026-09-03 cleanup:** the drift above turned out to be repo-wide, not isolated to
+one warning. 27 markdown files (12 at repo root, 15 under `docs/`) all predated the
+May–Aug 2026 rebuild (newsletter layer, CTC articles, topic guides) and were never
+updated — moved to `archive/root-docs-2026-02/` and `archive/docs-2026-02/` with an
+ARCHIVED banner on each, verified via git blame dates and content spot-checks, plan
+reviewed by an independent judge pass before executing. The dead static `web/`
+frontend (unmounted, unreferenced by any route, superseded by `frontend/` since
+2026-05) moved to `archive/web-legacy-frontend/`. `README.md` was rewritten to be a
+short accurate pointer to this file instead of a second, competing source of truth.
+`docs/specs/*.md` (dated Jul–Aug 2026, contemporaneous with the rebuild) were kept
+in place — they're current design specs, not stale docs. `LEARNINGS.md` and
+`AUDIO_SYNC_REFERENCE.md` were also kept: both are honestly-scoped historical/living
+references (a dated postmortem log, and a doc actively pointed to by
+`.cursor/rules/sync-and-debug.mdc`), not present-tense claims gone false.
+**If you're about to write a new root-level or `docs/`-level markdown file: don't.**
+Add to this file instead, or to `docs/specs/` if it's a design spec. A second
+freestanding doc is exactly how this drift happened the first time.
+
 ## Status: LIVE ✅ (last verified 2026-08-01)
 - **413 videos** indexed across 5 podcast channels; 390 have extracted insights
 - **1,530 newsletter issues**; ~1,190 have extracted insights (backlog draining, see below)
