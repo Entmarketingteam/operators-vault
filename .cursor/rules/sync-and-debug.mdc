@@ -19,9 +19,10 @@ alwaysApply: true
 
 ## When debugging or troubleshooting
 - At the start of a debugging session, suggest or run **`git pull origin master`** so local is up to date with any changes from elsewhere.
-- Prefer **fixing in this repo** and documenting in `AUDIO_SYNC_REFERENCE.md` or `docs/SYNC_AND_DEBUG_IN_CURSOR.md` when the fix affects audio/sync or workflow.
+- Prefer **fixing in this repo** and documenting in `AUDIO_SYNC_REFERENCE.md` when the fix affects audio/sync or workflow.
 - For cloud errors (e.g. yt-dlp on Railway): remind the user of the fast loop — **POST /process-one/async** with one `video_id`, then **GET /jobs/{job_id}** for `logs.stderr` — and use that output to decide the next code change here.
 
 ## References
+- `CLAUDE.md` — current app state; check here first.
 - `AUDIO_SYNC_REFERENCE.md` — audio download and sync behavior, where to look when things break.
-- `docs/SYNC_AND_DEBUG_IN_CURSOR.md` — sync workflow and quick debug commands.
+- `archive/docs-2026-02/SYNC_AND_DEBUG_IN_CURSOR.md` — historical sync workflow notes (archived 2026-09-03, predates the newsletter/CTC rebuild — read for background only, don't treat as current).
