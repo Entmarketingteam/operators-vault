@@ -344,3 +344,31 @@ precisely so the `$json`-vs-`$input.all()` bug that discarded all but one email 
 - No end-to-end test of Google sign-in → video insights flow documented
 - Custom domain beyond vercel.app not set up
 - `insight_people` table not populated by batch extraction — speaker pages rely on FTS fallback
+
+## Code Portability & Cross-Platform Rules (MANDATORY)
+To ensure seamless operations across Alienware (Windows `ejatc`), Work Laptop (Windows `ethan.atchley`), and Mac (macOS `ethanatchley`), all code and scripts must be 100% path-agnostic and cross-platform.
+
+### Rules for Paths and Environment Resolution:
+1. **NO Hardcoded Usernames in Paths:**
+   - *Python:* Never hardcode `/Users/username` or `C:\Users\username`. Always resolve dynamically using `os.path.expanduser("~")` or `os.environ["USERPROFILE"]`.
+   - *Batch files (.bat):* Use `%USERPROFILE%`.
+   - *PowerShell (.ps1):* Use `$HOME` or `$env:USERPROFILE`.
+   - *Bash/Shell (.sh):* Use `~/` or `$HOME`.
+2. **NO Hardcoded Temp Paths:**
+   - *Python:* Always use `tempfile.gettempdir()`.
+   - *Batch files:* Use `%TEMP%`.
+   - *PowerShell:* Use `$env:TEMP` or `[System.IO.Path]::GetTempPath()`.
+3. **NO Hardcoded Python Binary Paths:**
+   - Never write `C:\Program Files\PyManager\python3.exe` or specific file paths to a python executable. Always reference standard executables in PATH (`python` or `python3`), or check dynamically.
+4. **Script-Relative Project Directories:**
+   - *Batch files:* Use parent resolution `for %%i in ("%~dp0..") do set "PROJECT_DIR=%%~fyi"` or `%~dp0..`.
+   - *PowerShell:* Use `$PSScriptRoot` or `(Get-Item (Join-Path $PSScriptRoot "..")).FullName`.
+5. **Cross-Platform Conditionals:**
+   - When scripts must run on both Windows and Mac (e.g. Chrome cookies/profile readers), use platform checks:
+     ```python
+     import sys
+     if sys.platform == "win32":
+         # Windows paths
+     else:
+         # macOS paths
+     ```

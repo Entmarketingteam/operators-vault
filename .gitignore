@@ -12,6 +12,10 @@ build/
 .DS_Store
 *.mp4
 
+# Private Kajabi & Info-Marketing Ingestion (Strict Local Privacy)
+process_kajabi_to_vault.py
+prompts/info_marketing/
+
 # Downloaded wheels (install via scripts/install_wheels.ps1 or pip)
 wheels/
 *.whl
