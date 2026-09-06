@@ -2779,11 +2779,10 @@ def topic_guide(
     if not db_url:
         raise HTTPException(status_code=503, detail="DATABASE_URL not set")
 
-    # NOTE: there are two `@app.post("/topic-guide")` handlers in this file — this
-    # one and another further down that adds persistent caching. FastAPI matches in
-    # registration order, so THIS handler is the one that serves and the cached one
-    # below is unreachable dead code. That predates this change; flagged rather than
-    # deleted because the caching feature is someone else's call to keep or drop.
+    # NOTE (resolved 2026-08-01): a second `@app.post("/topic-guide")` handler with
+    # persistent caching used to sit further down this file. It was unreachable dead
+    # code (FastAPI matches in registration order, this handler always won) and was
+    # deleted rather than activated — see the longer NOTE near where it lived for why.
     #
     # Over-fetch, then quota down. Fetching exactly body.limit would leave nothing to
     # rebalance when one corpus dominates the top of the ranking — which is exactly
