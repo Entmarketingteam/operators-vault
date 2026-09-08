@@ -1198,7 +1198,7 @@ def _search_postgres(
                     f"""
                     SELECT ni.id, ni.source, ni.category, ni.title, ni.description,
                            n.subject, n.author, n.published_at,
-                           -- Platform-news roundups ("This Week in Ad Platforms...") are
+                           -- Platform-news roundups ("This Week in Ad Platforms…") are
                            -- kept but down-weighted: they are roughly 13 to 25 out of
                            -- every 100 recent CTC items, they go stale in weeks, and at full weight they
                            -- would crowd the evergreen unit-economics material this
