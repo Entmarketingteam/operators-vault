@@ -27,6 +27,7 @@ class TestTopicGuide(unittest.TestCase):
         self.assertEqual(context.exception.detail, "topic required")
         print("[PASS] Empty topic properly rejected with 400.")
 
+    @unittest.skipUnless(os.environ.get("DATABASE_URL"), "requires live DATABASE_URL")
     def test_topic_guide_invalid_topic(self):
         print("\nTesting topic guide with obscure non-existent topic...")
         request = api.TopicGuideRequest(topic="xyzobscurenonexistentterm")
@@ -35,6 +36,7 @@ class TestTopicGuide(unittest.TestCase):
         self.assertEqual(context.exception.status_code, 404)
         print("[PASS] Non-existent topic properly returned 404.")
 
+    @unittest.skipUnless(os.environ.get("DATABASE_URL"), "requires live DATABASE_URL")
     def test_topic_guide_successful_flow(self):
         print("\nTesting successful topic guide generation...")
         # Caching was deliberately removed 2026-08-01 (no invalidation, vault
