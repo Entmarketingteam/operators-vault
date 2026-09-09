@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest
+
+      - name: Run tests
+        run: python -m pytest test_*.py -v
+
+# --- Usage ---
+# This workflow runs on every push to master and on pull requests.
+# It installs the repo's dependencies from requirements.txt and runs pytest.
+# Tests must:
+# 1. Assert real business invariants (row counts, specific computed values)
+#    not just "no exception raised" — see traps.md T21.
+# 2. Be runnable without external services when possible (see test_search_ranking.py
+#    for unit tests of pure business logic).
+# 3. Have descriptive failures so regressions are caught immediately.
