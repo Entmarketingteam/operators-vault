@@ -22,10 +22,8 @@ class TestNewsletterSearchNoIndexError(unittest.TestCase):
     write out "percent" or use a ratio instead.
     """
 
+    @unittest.skipUnless(os.environ.get("DATABASE_URL"), "requires live DATABASE_URL")
     def test_newsletter_search_returns_hits_without_error(self):
-        os.environ.setdefault("DATABASE_URL", os.environ.get("DATABASE_URL", ""))
-        if not os.environ.get("DATABASE_URL"):
-            self.skipTest("DATABASE_URL not set")
 
         errors_logged = []
         orig_error = api._log.error
